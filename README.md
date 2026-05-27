@@ -2,6 +2,24 @@
 
 Встраиваемый текстовый редактор для Flutter: piece tree, транзакции, слои стилей, кастомная отрисовка.
 
+## Демо
+
+Приложение [`example/`](example/): подсветка Dart (tree-sitter и LSP), gutter, диагностики и переключаемые темы оформления.
+
+| VS Code Dark | VS Code Light | Dracula |
+| :---: | :---: | :---: |
+| ![VS Code Dark](docs/images/vscode_dark.png) | ![VS Code Light](docs/images/vscode_light.png) | ![Dracula](docs/images/dracula.png) |
+
+| Monokai | One Dark | Gruvbox Dark |
+| :---: | :---: | :---: |
+| ![Monokai](docs/images/monokai.png) | ![One Dark](docs/images/one_dark.png) | ![Gruvbox Dark](docs/images/gruvbox_dark.png) |
+
+| Solarized Dark | Solarized Light | Nord |
+| :---: | :---: | :---: |
+| ![Solarized Dark](docs/images/solarized_dark.png) | ![Solarized Light](docs/images/solarized_light.png) | ![Nord](docs/images/nord.png) |
+
+Запуск: `cd example && flutter run` (для tree-sitter на desktop сначала `cd example/native && make`).
+
 ## Документация
 
 - [Архитектура](docs/ARCHITECTURE.md)
@@ -19,8 +37,6 @@ EditorView(
   showGutter: true,
 );
 ```
-
-Демо: `cd example && flutter run`
 
 ## Действия (команды), меню и клавиши
 
