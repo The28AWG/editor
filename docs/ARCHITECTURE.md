@@ -1,0 +1,421 @@
+# Архитектура библиотеки `editor`
+
+Документ описывает архитектуру встраиваемого текстового редактора для Dart / Flutter.
+Это **не** полнофункциональная IDE, а библиотека «окна редактирования», которую встраивают в редактор кода или другое приложение.
+
+Ориентиры по UX и разделению ответственности: Monaco (VS Code), CodeMirror 6, Zed.
+
+---
+
+## 1. Цели и границы
+
+### 1.1 В зоне библиотеки
+
+- Буфер текста (**piece tree**), атомарные правки, undo / redo
+- Каретка, выделение, multi-cursor
+- Раскладка строк (включая word wrap), координаты глифов, hit-test, скролл viewport
+- Слияние стилей отображения и отрисовка текста с полным контролем (не `TextField`)
+- Базовые команды редактирования и расширяемый реестр действий ([EditorActionId])
+- Диагностика (подчёркивания, inline-метки), inlay hints, подсветка каретки
+- Необязательная интеграция с языковым сервисом ([EditorLanguageService])
+
+### 1.2 Вне библиотеки (хост)
+
+- Файловая система, LSP-транспорт, git, панели, вкладки, глобальный поиск
+- Семантика языка (через API слоёв стилей и/или LSP в example)
+- Тема приложения, меню, иконки, настройки проекта
+
+### 1.3 Ключевые принципы
+
+| Принцип | Формулировка |
+|--------|--------------|
+| Единый источник текста | Содержимое хранит только **Document** |
+| Стили не в буфере | Цвет символа не является полем символа в модели |
+| Правки только через движок | Любое изменение текста — **Transaction** → undo и инвалидация |
+| UTF-16 в API | Offset и column — в code units, как у `String` в Dart и LSP |
+| Слои стилей с приоритетом | Итоговый вид символа определяет **StyleResolver** |
+| Viewport-aware подсветка | Хост получает **ViewportStyleScope**; syntax-слои сужают бинарный поиск по токенам |
+
+---
+
+## 2. Слои системы
+
+```mermaid
+flowchart TB
+  subgraph host["Хост (IDE / приложение)"]
+    Lang["Tokenizer / LSP tokens"]
+    Dec["Diagnostics"]
+    Cmd["Actions / Keybindings"]
+    LSP["EditorLanguageService"]
+  end
+
+  subgraph lib["Библиотека editor"]
+    Doc["Document + PieceTree"]
+    Eng["Transaction + Undo"]
+    Sel["Selection"]
+    Sty["StyleResolver + layers"]
+    Lay["LineLayout + GlyphCache"]
+    View["EditorView + EditorScrollable"]
+    Inp["Input + Commands"]
+  end
+
+  Lang --> Sty
+  Dec --> Sty
+  LSP --> Sel
+  Doc --> Lay
+  Sty --> Lay
+  Lay --> View
+  Inp --> Eng
+  Eng --> Doc
+  Cmd --> Inp
+  View --> Inp
+```
+
+### 2.1 Model — «что написано»
+
+**Document** — изменяемый текст. Реализация буфера: **PieceTree** (`lib/src/model/buffer/piece_tree.dart`) + **LineIndex** для O(1) `lineStart` / `positionAt` при типичных правках.
+
+**Version** — монотонно растёт после каждого пакета `apply`; подписчики и слои стилей синхронизируются по `document.version`.
+
+**Система координат:**
+
+| Тип | Описание |
+|-----|----------|
+| `offset` / `TextOffset` | Индекс в UTF-16 code units, `[0, length]` |
+| `Position` | `(line, column)`, column в code units |
+| `Range` | Полуоткрытый `[start, end)` в offset |
+| `TextAffinity` | `upstream` / `downstream` на границах surrogate pair и переносов |
+
+### 2.2 Editing — «как меняется текст»
+
+**Transaction** — единственная точка применения `TextEdit` к Document; обновляет selection внутри транзакции.
+
+**UndoStack** — группировка по транзакциям; merge смежного ввода (опционально).
+
+**CommandRegistry** — встроенные команды и регистрация кастомных действий хоста.
+
+### 2.3 View / Layout — «где это на экране»
+
+**LineLayout** — строки документа → визуальные строки (word wrap), метрики глифов, `getBoxesForRange`, кэш высот блоков.
+
+**ViewportState** — `firstVisibleLine`, `scrollOffset`, размеры viewport; расчёт последней видимой строки в **пикселях** (`theme.lineHeightPx`).
+
+**EditorScrollable** — ядро отрисовки: layout, paint, скролл, синхронизация **ViewportStyleScope** с контроллером, частичная инвалидация строк.
+
+### 2.4 Integration — «как подключается хост»
+
+**EditorController** — фасад: document, selection, resolver, diagnostics, `setHost`, `setLanguageService`, `refreshStyleLayers`, `syncStyleViewportFromEditorState`.
+
+**EditorView** — тонкая обёртка над `EditorScrollable`.
+
+**EditorHost** — поставщик **StyleLayer** и колбэки `onDocumentChanged` / `onSelectionChanged` / `onNavigate`.
+
+**EditorLanguageService** — асинхронные document highlights, linked editing, inlay hints, link targets (см. §8).
+
+---
+
+## 3. Поток данных при правке
+
+```mermaid
+sequenceDiagram
+  participant Inp as Input / perform
+  participant Eng as Transaction
+  participant Doc as Document
+  participant Ctrl as EditorController
+  participant Host as EditorHost
+  participant Res as StyleResolver
+  participant Lay as LineLayout
+  participant View as EditorScrollable
+
+  Inp->>Eng: apply edits
+  Eng->>Doc: TextEdits + bump version
+  Eng->>Ctrl: notifyListeners
+  Ctrl->>Host: onDocumentChanged
+  Host-->>Ctrl: async tokens (later)
+  Ctrl->>Res: _rebuildResolver / replaceLayers
+  Note over Ctrl,View: scroll: applyViewportHint only
+  Ctrl->>Lay: invalidate affected lines
+  Lay->>View: markNeedsPaint / setState
+```
+
+**Запрет:** UI и хост не изменяют `Document` в обход **Transaction**.
+
+После асинхронной токенизации хост вызывает `EditorController.refreshStyleLayers()` (часто из `addPostFrameCallback`), предварительно синхронизируя viewport через `syncStyleViewportFromEditorState`.
+
+---
+
+## 4. Структура пакета
+
+Актуальная раскладка (основные модули):
+
+```
+lib/
+  editor.dart                      # публичный export
+  src/
+    model/
+      document.dart
+      document_change.dart
+      buffer/
+        piece_tree.dart
+        line_index.dart
+      position.dart
+      text_edit.dart
+      transaction.dart
+    selection/
+    editing/
+      edit_engine.dart
+      undo_stack.dart
+      commands/
+      clipboard_text.dart
+      command_registry.dart
+    styling/
+      style_resolver.dart
+      style_span.dart
+      style_layer.dart
+      style_span_mask.dart          # проекция pending-правок на snapshot токенов
+      sorted_style_spans.dart       # бинарный поиск + SpanSearchBounds
+      viewport_style_scope.dart     # scroll vs caret для хоста
+      layers/
+        base_style_layer.dart
+        syntax_style_layer.dart
+        pending_shifted_syntax_layer.dart
+        decoration_style_layer.dart
+        transient_style_layer.dart
+    layout/
+      line_layout.dart
+      glyph_cache.dart
+      viewport.dart
+      visual_line.dart
+      styled_run_layout.dart
+    view/
+      editor_view.dart
+      editor_scrollable.dart
+      layers/
+        editor_layers_painter.dart
+        gutter_layer.dart
+      input/
+      menu/
+      pointer/
+      inlay/
+    api/
+      editor_controller.dart
+      editor_host.dart
+      editor_language_service.dart
+      editor_action.dart
+      editor_menu.dart
+      selection_change.dart
+    diagnostics/
+    highlight/
+    inlay/
+    navigation/
+```
+
+Демо LSP: `example/lib/` (`DartSyntaxHighlighter`, `main.dart`).
+
+**Публичный API** — `lib/editor.dart`: контроллер, виджет, позиции, правки, тема, слои стилей, viewport, маски pending. Детали piece tree и paint остаются в `src/`.
+
+---
+
+## 5. Владение форматированием
+
+### 5.1 Постановка
+
+У одного offset может быть разный цвет, фон, подчёркивание. Итог даёт **StyleResolver** по приоритетам слоёв. **Document** хранит только текст.
+
+### 5.2 Слои в контроллере (снизу вверх)
+
+| Слой | Источник | Назначение |
+|------|----------|------------|
+| **BaseStyleLayer** | `EditorTheme` | Цвет/шрифт по умолчанию |
+| **Syntax** (хост) | `EditorHost.styleLayersFor` | LSP semantic tokens, tokenizer |
+| **DecorationStyleLayer** | `setDiagnostics` | Волнистые подчёркивания, фон строк |
+| **TransientStyleLayer** | библиотека | Selection, bracket match, preedit, language highlights |
+
+Отдельного класса «Semantic» в библиотеке нет: семантика хоста попадает в **SyntaxStyleLayer** / **PendingShiftedSyntaxLayer**.
+
+### 5.3 Контракт слоя
+
+```dart
+abstract interface class StyleLayer {
+  String get id;
+  int? get validForDocumentVersion;
+  Iterable<StyleSpan> spansForRange(Range range);
+}
+```
+
+**StyleResolver** для строки документа собирает span'ы со всех слоёв (для syntax — один вызов `spansForRange` на слой за строку, не на каждый сегмент), сортирует по приоритету и строит **AttributedRun**.
+
+**styleEpoch** — инвалидация кэша layout при смене слоёв; `replaceLayers` не пересоздаёт список, если ссылки на слои те же (типичный keystroke с обновлением `PendingShiftedSyntaxLayer` in-place).
+
+### 5.4 Viewport-aware syntax (большие файлы)
+
+Проблема: snapshot LSP на десятки тысяч символов (~3000+ span'ов); пересчёт и полный бинарный поиск на каждый кадр недопустим.
+
+**ViewportStyleScope** (`fromViewport`):
+
+- **documentRange** — видимая полоса **scroll** (± overscan, cap `kMaxStyleViewportLines`), высота строки в **px** (`lineHeightPx`, не множитель темы).
+- **caretSearchRange** — дополнительная полоса вокруг каретки, только если каретка **вне** видимого scroll; без непрерывного «моста» от строки 0 до 1500.
+- При cap off-screen каретки центр окна — середина **scroll**, не позиция каретки.
+
+**EditorScrollable** вызывает `controller.computeStyleViewportScope()` / `updateStyleViewport`. При прокрутке — `applyViewportHint` без полного `styleLayersFor`.
+
+**SyntaxStyleLayer** / **PendingShiftedSyntaxLayer** хранят `spanSearchBounds` — срез `sorted[lo..hi)` для бинарного поиска в `spansForSortedRange`. Пустое пересечение с диапазоном не откатывается к «весь файл» (соседний span или merge scroll+caret).
+
+### 5.5 Pending snapshot (лаг LSP)
+
+Пока `document.version` > `highlightVersion` хост отдаёт **PendingShiftedSyntaxLayer**:
+
+- Базовый отсортированный snapshot LSP.
+- Журнал **StyleChange** ([style_span_mask.dart](lib/src/styling/style_span_mask.dart)): сдвиг span'ов, coalesce вставок, `clipBefore` при paste/многострочных правках.
+- Проекция `spansForRange` без материализации всего массива на каждый keystroke.
+
+Example: `DartSyntaxHighlighter` — debounce full `semanticTokens`, немедленный full при undo, batch `didChange` в LSP.
+
+### 5.6 Инвалидация
+
+`DocumentChange` содержит правки и `affectedLineRange`. Хост обновляет токены асинхронно; слои с `validForDocumentVersion` игнорируются resolver'ом при рассинхроне.
+
+**Запреты** (без изменений): синхронный LSP на каждый кадр; запись стилей в Document; один `TextStyle` на весь виджет.
+
+---
+
+## 6. Отрисовка
+
+**EditorLayersPainter** / **EditorScrollable** (снизу вверх):
+
+1. Фон, current line, gutter (опционально)
+2. Текст по **AttributedRun** (`GlyphCache`, моноширинный/пропорциональный шрифт)
+3. Inlay hints (виртуальные аннотации)
+4. Selection, carets
+5. Diagnostics / link underline
+
+**Оптимизации для больших файлов:**
+
+- Прыжок к первой видимой строке по `lineIndexForDocumentY` при paint
+- Быстрый путь высоты строк без wrap (`LineLayout`)
+- Селективная инвалидация `maxLinePaintWidth`
+- `markNeedsPaint` без `setState` на части путей прокрутки/правок
+
+**Word wrap:** визуальная строка ≠ строка документа; на границах wrap обязателен **TextAffinity**.
+
+---
+
+## 7. Ввод, команды, буфер обмена
+
+**EditorInputHandler** / **EditorTextInputClient** — клавиатура и IME.
+
+Центральная модель действий — **EditorActionId** + `EditorController.perform` / `executeCommand`.
+
+| Компонент | Роль |
+|-----------|------|
+| `clipboard_text.dart` | Copy/paste, мультикурсор + N строк буфера |
+| `EditorMenuConfiguration` | Контекстное меню, toolbar |
+| `readOnly` | Cut/paste блокируются; undo через API возможен |
+
+**Multi-cursor:** правки с конца документа или одна транзакция.
+
+---
+
+## 8. События и языковой сервис
+
+| API | Когда | Назначение |
+|-----|-------|------------|
+| `DocumentChange` | После commit | LSP `didChange`, повторная токенизация |
+| `SelectionChange` | Смена selection | Status bar, documentHighlight |
+| `EditorLanguageService` | Debounced async | Occurrences, linked editing, inlay, links |
+| `EditorHost.onNavigate` | Ctrl+клик | Переход по `EditorDocumentLocation` |
+
+**EditorLanguageService** — опционально; контроллер отбрасывает устаревшие ответы по generation + version.
+
+---
+
+## 9. Публичные контракты
+
+### 9.1 EditorController (основное)
+
+- `document`, `selection`, `viewport`, `resolver`, `theme`
+- `apply`, `executeCommand`, `perform`, `undo` / `redo`
+- `setHost`, `setDiagnostics`, `setLanguageService`, `refreshStyleLayers`
+- `styleViewport`, `syncStyleViewportFromEditorState`, `computeStyleViewportScope`
+- `readOnly`, `ChangeNotifier`
+
+### 9.2 EditorHost
+
+```dart
+abstract mixin class EditorHost {
+  List<StyleLayer> styleLayersFor(
+    int documentVersion, {
+    ViewportStyleScope? viewport,
+  });
+
+  void onDocumentChanged(DocumentChange change) {}
+  void onSelectionChanged(SelectionChange change) {}
+  String? get editorDocumentUri => null;
+  void onNavigate(EditorDocumentLocation location) {}
+}
+```
+
+Хост возвращает `null`/пустой список, пока токены не готовы. Viewport передаётся из контроллера при каждой пересборке resolver.
+
+### 9.3 EditorView
+
+```dart
+class EditorView extends StatefulWidget {
+  const EditorView({
+    required this.controller,
+    this.host,
+    this.showGutter = false,
+    // actionConfiguration, menuConfiguration, ...
+    super.key,
+  });
+
+  final EditorController controller;
+  final EditorHost? host;
+}
+```
+
+`host` можно задать и через `EditorController(..., host:)` + `setHost`.
+
+---
+
+## 10. Статус реализации
+
+| Область | Статус |
+|---------|--------|
+| Piece tree, LineIndex, Position | ✅ |
+| Transaction, Undo, команды, multi-cursor | ✅ |
+| LineLayout, wrap, GlyphCache | ✅ |
+| StyleResolver, Base / Syntax / Decoration / Transient | ✅ |
+| EditorView, scroll, gutter, selection, caret | ✅ |
+| Viewport-aware syntax, pending shift, span mask | ✅ |
+| Diagnostics, inlay hints | ✅ |
+| EditorLanguageService (API) | ✅ |
+| EditorActionId, меню, clipboard | ✅ |
+| Link navigation (Ctrl+клик) | ✅ |
+| LSP semantic tokens range/delta в Dart analyzer | ❌ (только full в example) |
+| Minimap, blame, injection grammars | ❌ / хост |
+| Attributed text в Document | ❌ (не цель v1) |
+
+Unit/widget-тесты: `test/`, `flutter test` (model, styling, layout, navigation).
+
+---
+
+## 11. Зафиксированные решения
+
+1. **UTF-16** во всех публичных типах позиций.
+2. **Plain text** в Document; стили только через слои.
+3. **Правки** только через **Transaction**.
+4. **Кэш layout** зависит от `document.version`, `styleEpoch`, затронутых строк и метрик viewport.
+5. **Viewport для токенов** — scroll в `documentRange`; off-screen caret — отдельный `caretSearchRange`; merge индексов без непрерывного docRange.
+6. **lineHeightPx** для `lastVisibleLine`, не `theme.lineHeight` (множитель).
+
+---
+
+## 12. Связанные документы
+
+- [README.md](../README.md) — быстрый старт, действия, тесты
+- [CHANGELOG.md](../CHANGELOG.md) — история изменений
+- `example/` — демо с Dart Analysis Server (semantic highlighting, diagnostics)
+- Исходники: `lib/src/`, публичный API: `lib/editor.dart`
+
+При изменении архитектуры обновляйте этот файл и при необходимости README.

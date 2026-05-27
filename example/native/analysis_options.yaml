@@ -1,0 +1,11 @@
+# Заглушка: каталог native не является Dart-пакетом проекта.
+# Анализатор и DCM не должны обрабатывать third_party/out (см. example/.vscode/settings.json
+# и dart.analysisExcludedFolders). Если контекст всё же открыт — исключаем всё.
+
+analyzer:
+  exclude:
+    - "**"
+
+dcm:
+  exclude:
+    - "**"
