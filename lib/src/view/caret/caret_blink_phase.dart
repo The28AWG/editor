@@ -16,7 +16,9 @@ double caretBlinkLerpT({
   if (cycle <= Duration.zero) return 0;
 
   final idle = elapsed - solidUntil;
-  final pos = Duration(microseconds: idle.inMicroseconds % cycle.inMicroseconds);
+  final pos = Duration(
+    microseconds: idle.inMicroseconds % cycle.inMicroseconds,
+  );
   return pos < theme.visibleDuration ? 0.0 : 1.0;
 }
 
@@ -39,7 +41,9 @@ Duration caretBlinkDelayUntilNextPhase({
   }
 
   final idle = elapsed - solidUntil;
-  final pos = Duration(microseconds: idle.inMicroseconds % cycle.inMicroseconds);
+  final pos = Duration(
+    microseconds: idle.inMicroseconds % cycle.inMicroseconds,
+  );
   if (pos < theme.visibleDuration) {
     return theme.visibleDuration - pos;
   }

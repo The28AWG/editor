@@ -4,7 +4,8 @@ import 'package:example/lsp/lsp_location.dart';
 import 'package:example/lsp/lsp_position.dart';
 
 /// [EditorLanguageService] backed by `dart language-server`.
-final class DartLanguageService implements EditorLanguageService {
+final class DartLanguageService
+    implements EditorLanguageService, EditorOverlayLanguageService {
   DartLanguageService(this._client);
 
   final DartLspClient _client;
@@ -73,4 +74,39 @@ final class DartLanguageService implements EditorLanguageService {
     final highlight = wordRangeAt(text, offset) ?? Range(offset, offset + 1);
     return EditorLinkTarget(highlightRange: highlight, destination: definition);
   }
+
+  @override
+  Future<EditorCompletionList?> completions({
+    required String text,
+    required int documentVersion,
+    required TextOffset offset,
+    EditorCompletionTrigger trigger = EditorCompletionTrigger.invoked,
+    String? triggerCharacter,
+  }) => _client.completion(
+    text,
+    lspPositionAt(text, offset),
+    trigger: trigger,
+    triggerCharacter: triggerCharacter,
+  );
+
+  @override
+  Future<EditorCompletionItem?> resolveCompletionItem({
+    required String text,
+    required int documentVersion,
+    required EditorCompletionItem item,
+  }) => _client.resolveCompletionItem(text, item);
+
+  @override
+  Future<EditorHover?> hover({
+    required String text,
+    required int documentVersion,
+    required TextOffset offset,
+  }) => _client.hover(text, lspPositionAt(text, offset));
+
+  @override
+  Future<EditorSignatureHelp?> signatureHelp({
+    required String text,
+    required int documentVersion,
+    required TextOffset offset,
+  }) => _client.signatureHelp(text, lspPositionAt(text, offset));
 }

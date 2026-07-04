@@ -17,6 +17,7 @@
 - Слияние стилей отображения и отрисовка текста с полным контролем (не `TextField`)
 - Базовые команды редактирования и расширяемый реестр действий ([EditorActionId])
 - Диагностика (подчёркивания, inline-метки), inlay hints, подсветка каретки
+- **Overlay** — всплывающие панели (completion, hover, signature help, sticky UI)
 - Необязательная интеграция с языковым сервисом ([EditorLanguageService])
 
 ### 1.2 Вне библиотеки (хост)
@@ -47,6 +48,7 @@ flowchart TB
     Dec["Diagnostics"]
     Cmd["Actions / Keybindings"]
     LSP["EditorLanguageService"]
+    Ovl["Overlay content (completion UI)"]
   end
 
   subgraph lib["Библиотека editor"]
@@ -57,11 +59,13 @@ flowchart TB
     Lay["LineLayout + GlyphCache"]
     View["EditorView + EditorScrollable"]
     Inp["Input + Commands"]
+    OvlC["EditorOverlayCoordinator"]
   end
 
   Lang --> Sty
   Dec --> Sty
   LSP --> Sel
+  Ovl --> OvlC
   Doc --> Lay
   Sty --> Lay
   Lay --> View
@@ -69,6 +73,7 @@ flowchart TB
   Eng --> Doc
   Cmd --> Inp
   View --> Inp
+  View --> OvlC
 ```
 
 ### 2.1 Model — «что написано»
@@ -111,6 +116,8 @@ flowchart TB
 **EditorHost** — поставщик **StyleLayer** и колбэки `onDocumentChanged` / `onSelectionChanged` / `onNavigate`.
 
 **EditorLanguageService** — асинхронные document highlights, linked editing, inlay hints, link targets (см. §8).
+
+**EditorOverlayCoordinator** — стек всплывающих панелей поверх viewport (см. §7.5).
 
 ---
 
@@ -197,10 +204,20 @@ lib/
       menu/
       pointer/
       inlay/
+    overlay/
+      editor_overlay_anchor.dart
+      editor_overlay_coordinator.dart
+      editor_overlay_descriptor.dart
+      editor_overlay_dismiss.dart
+      editor_overlay_geometry.dart
+      editor_overlay_layout.dart
+      editor_overlay_presenter.dart
+      editor_overlay_resizable.dart
     api/
       editor_controller.dart
       editor_host.dart
       editor_language_service.dart
+      editor_overlay.dart
       editor_action.dart
       editor_menu.dart
       selection_change.dart
@@ -210,7 +227,7 @@ lib/
     navigation/
 ```
 
-Демо LSP: `example/lib/` (`DartSyntaxHighlighter`, `main.dart`).
+Демо LSP и overlay: `example/lib/` (`DartSyntaxHighlighter`, `overlay/editor_overlay_demos.dart`, `main.dart`).
 
 **Публичный API** — `lib/editor.dart`: контроллер, виджет, позиции, правки, тема, слои стилей, viewport, маски pending. Детали piece tree и paint остаются в `src/`.
 
@@ -314,6 +331,90 @@ Example: `DartSyntaxHighlighter` — debounce full `semanticTokens`, немед�
 
 **Multi-cursor:** правки с конца документа или одна транзакция.
 
+### 7.5 Overlay (всплывающие панели)
+
+**Inline vs floating:** inlay hints, squiggles и ghost text рисуются в **EditorLayersPainter** (привязка к offset в документе). Completion, hover, signature help и find bar — **overlay**: Flutter-виджеты в `Stack` поверх viewport, якорь в экранных координатах.
+
+```mermaid
+flowchart TB
+  subgraph scroll["EditorScrollable"]
+    Surf["Scroll + CustomPaint"]
+    Stack["EditorOverlayStack"]
+  end
+
+  Ctrl["EditorController.overlays"]
+  Geo["EditorOverlayGeometrySource"]
+  Host["Хост: builder + LSP data"]
+
+  Host -->|show descriptor| Ctrl
+  Ctrl --> Stack
+  Geo -->|caretRect / rangeRect| Ctrl
+  Surf --> Geo
+```
+
+| Компонент | Роль |
+|-----------|------|
+| [EditorOverlayCoordinator](lib/src/overlay/editor_overlay_coordinator.dart) | `show` / `hide` / `hideAll`, приоритеты, dismiss по scroll/doc/selection |
+| [EditorOverlayDescriptor](lib/src/overlay/editor_overlay_descriptor.dart) | id, якорь, layout, dismiss, `children` (nested details) |
+| [EditorOverlayAnchor](lib/src/overlay/editor_overlay_anchor.dart) | `EditorCaretOverlayAnchor`, `EditorRangeOverlayAnchor`, `EditorPointOverlayAnchor`, `EditorViewportOverlayAnchor` |
+| [EditorOverlayLayoutPolicy](lib/src/overlay/editor_overlay_layout.dart) | placement, flip, clamp, max/preferred size, `resizable` |
+| [EditorOverlayDismissPolicy](lib/src/overlay/editor_overlay_dismiss.dart) | outside click, Escape, scroll, document/selection change, `trackAnchorOnScroll` |
+| [EditorOverlayGeometrySource](lib/src/overlay/editor_overlay_geometry.dart) | `caretRectInGlobal`, `rangeRectInGlobal`, `viewportRectInGlobal` |
+| [EditorOverlayStack](lib/src/overlay/editor_overlay_presenter.dart) | отрисовка стека, scrim, focus scope при `capturesKeyboard` |
+| [EditorResizablePanel](lib/src/overlay/editor_overlay_resizable.dart) | изменяемый размер documentation pane |
+
+**Жизненный цикл:**
+
+1. Хост вызывает `controller.overlays.show(EditorOverlayDescriptor(...))`.
+2. [EditorScrollable](lib/src/view/editor_scrollable.dart) регистрирует [EditorScrollableOverlayGeometry](lib/src/overlay/editor_overlay_geometry.dart) через `attachOverlayGeometry`.
+3. Coordinator разрешает якорь (`resolveOverlayAnchorRect`), считает позицию (`computeOverlayLayout`), рендерит панели.
+4. При scroll / правке / смене каретки — `onScroll`, `onDocumentChanged`, `onSelectionChanged`, `refreshAnchors` (из `_onControllerChanged` и scroll listeners).
+5. Верхний overlay с `capturesKeyboard: true` блокирует [EditorInputHandler] (`_blocksEditorInput`).
+
+**Вложенность:** `EditorOverlayDescriptor.children` — дочерние панели (например, documentation справа от completion list). Якорь child = bbox родителя после measure/resize. `exclusiveWithinKind` для child обычно `false`, чтобы не закрывать parent.
+
+**Конфликты:** `priority` + `supersedesLowerPriority`; `EditorOverlayKind` + `exclusiveWithinKind` (только root overlays).
+
+**Пример (хост):**
+
+```dart
+controller.overlays.show(
+  EditorOverlayDescriptor(
+    id: 'completion',
+    kind: EditorOverlayKind.completion,
+    priority: 100,
+    capturesKeyboard: true,
+    anchor: EditorCaretOverlayAnchor(replaceRange: partialTokenRange),
+    layout: const EditorOverlayLayoutPolicy(maxHeight: 280, preferredWidth: 320),
+    dismissPolicy: const EditorOverlayDismissPolicy(
+      scroll: false,
+      trackAnchorOnScroll: true,
+    ),
+    builder: (context, session) => CompletionListWidget(...),
+    children: [
+      EditorOverlayDescriptor(
+        id: 'completion-details',
+        layout: const EditorOverlayLayoutPolicy(
+          placement: EditorOverlayPlacement.besideEnd,
+          resizable: true,
+          preferredWidth: 360,
+        ),
+        anchor: const EditorViewportOverlayAnchor(),
+        builder: (context, session) => EditorResizablePanel(
+          initialSize: const Size(360, 240),
+          onResize: session.resize,
+          child: DocumentationView(...),
+        ),
+      ),
+    ],
+  ),
+);
+```
+
+Демо без LSP: [example/lib/overlay/editor_overlay_demos.dart](../example/lib/overlay/editor_overlay_demos.dart). **LSP:** [dart_lsp_overlay_controller.dart](../example/lib/overlay/dart_lsp_overlay_controller.dart) — `textDocument/completion`, `completionItem/resolve`, `hover`, `signatureHelp` через [DartLanguageService](../example/lib/lsp/dart_language_service.dart). Меню **Overlays** и Ctrl+Space в example.
+
+Контекстное меню пока на `ContextMenuController` (отдельный путь); его можно позже перевести на `overlays`.
+
 ---
 
 ## 8. События и языковой сервис
@@ -323,9 +424,10 @@ Example: `DartSyntaxHighlighter` — debounce full `semanticTokens`, немед�
 | `DocumentChange` | После commit | LSP `didChange`, повторная токенизация |
 | `SelectionChange` | Смена selection | Status bar, documentHighlight |
 | `EditorLanguageService` | Debounced async | Occurrences, linked editing, inlay, links |
+| `EditorLanguageService` (хост) | По запросу overlay | `completions`, `hover`, `signatureHelp` |
 | `EditorHost.onNavigate` | Ctrl+клик | Переход по `EditorDocumentLocation` |
 
-**EditorLanguageService** — опционально; контроллер отбрасывает устаревшие ответы по generation + version.
+**EditorLanguageService** — опционально; контроллер отбрасывает устаревшие ответы по generation + version. Overlay-запросы (`completions`, `hover`, `signatureHelp`) — отдельный [EditorOverlayLanguageService](../lib/src/api/editor_overlay_language_service.dart); хост вызывает их из overlay-контроллера (см. `example/lib/overlay/dart_lsp_overlay_controller.dart`).
 
 ---
 
@@ -336,6 +438,7 @@ Example: `DartSyntaxHighlighter` — debounce full `semanticTokens`, немед�
 - `document`, `selection`, `viewport`, `resolver`, `theme`
 - `apply`, `executeCommand`, `perform`, `undo` / `redo`
 - `setHost`, `setDiagnostics`, `setLanguageService`, `refreshStyleLayers`
+- `overlays` ([EditorOverlayCoordinator]), `overlayGeometry`, `attachOverlayGeometry`
 - `styleViewport`, `syncStyleViewportFromEditorState`, `computeStyleViewportScope`
 - `readOnly`, `ChangeNotifier`
 
@@ -392,6 +495,10 @@ class EditorView extends StatefulWidget {
 | EditorLanguageService (API) | ✅ |
 | EditorActionId, меню, clipboard | ✅ |
 | Link navigation (Ctrl+клик) | ✅ |
+| EditorOverlayCoordinator, geometry, nested panels | ✅ |
+| EditorLanguageService completion / hover / signature (API) | ✅ [EditorOverlayLanguageService] |
+| LSP completion / hover / signature в example | ✅ |
+| LSP completion / hover / signature в EditorLanguageService | ❌ / хост |
 | LSP semantic tokens range/delta в Dart analyzer | ❌ (только full в example) |
 | Minimap, blame, injection grammars | ❌ / хост |
 | Attributed text в Document | ❌ (не цель v1) |
@@ -415,7 +522,7 @@ Unit/widget-тесты: `test/`, `flutter test` (model, styling, layout, navigat
 
 - [README.md](../README.md) — быстрый старт, действия, тесты
 - [CHANGELOG.md](../CHANGELOG.md) — история изменений
-- `example/` — демо с Dart Analysis Server (semantic highlighting, diagnostics)
+- `example/` — демо с Dart Analysis Server и overlay (меню **Overlays**, Ctrl+Space)
 - Исходники: `lib/src/`, публичный API: `lib/editor.dart`
 
 При изменении архитектуры обновляйте этот файл и при необходимости README.

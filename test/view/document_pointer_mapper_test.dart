@@ -13,7 +13,10 @@ void main() {
 
     setUp(() {
       final doc = Document.fromText('abcdef\n');
-      final theme = EditorTheme.dark().copyWith(fontFamily: 'monospace', fontSize: 14);
+      final theme = EditorTheme.dark().copyWith(
+        fontFamily: 'monospace',
+        fontSize: 14,
+      );
       final resolver = StyleResolver(
         theme: theme,
         layers: [BaseStyleLayer(theme)],

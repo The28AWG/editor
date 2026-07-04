@@ -9,9 +9,12 @@ import 'package:example/lsp/dart_language_service.dart';
 import 'package:example/lsp/dart_syntax_highlighter.dart';
 import 'package:example/lsp/highlight_debug.dart';
 import 'package:example/lsp/lsp_debug.dart';
+import 'package:example/overlay/dart_lsp_overlay_controller.dart';
+import 'package:example/overlay/editor_overlay_demos.dart';
 import 'package:example/selection_debug.dart';
 import 'package:example/tree_sitter/dart_tree_sitter_highlighter.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 void main() {
   runApp(EditorExampleApp(controller: AppAppearanceController()));
@@ -143,6 +146,8 @@ class _EditorDemoPageState extends State<EditorDemoPage> with EditorHost {
   late final EditorController _controller;
   late final Stopwatch _sinceStart;
   String? _appliedAppearanceName;
+  DartLanguageService? _languageService;
+  DartLspOverlayController? _lspOverlays;
 
   DartSyntaxHighlighter? get _lspHighlighter => widget.services.lsp;
   DartTreeSitterSyntaxHighlighter? get _treeSitterHighlighter =>
@@ -190,7 +195,13 @@ class _EditorDemoPageState extends State<EditorDemoPage> with EditorHost {
       };
       _controller
         ..setDiagnostics(lsp.diagnostics)
-        ..setLanguageService(DartLanguageService(lsp.client));
+        ..setLanguageService(
+          _languageService = DartLanguageService(lsp.client),
+        );
+      _lspOverlays = DartLspOverlayController(
+        controller: _controller,
+        languageService: _languageService!,
+      );
     }
   }
 
@@ -229,8 +240,45 @@ class _EditorDemoPageState extends State<EditorDemoPage> with EditorHost {
 
   @override
   void dispose() {
+    _lspOverlays?.dispose();
     _controller.dispose();
     super.dispose();
+  }
+
+  void _onOverlayMenu(String value) {
+    final lsp = _lspOverlays;
+    switch (value) {
+      case 'completion':
+        if (lsp != null) {
+          unawaited(lsp.showCompletion());
+        } else {
+          EditorOverlayDemos.showCompletion(_controller);
+        }
+      case 'hover':
+        if (lsp != null) {
+          unawaited(lsp.showHover());
+        } else {
+          EditorOverlayDemos.showHover(_controller);
+        }
+      case 'signature':
+        if (lsp != null) {
+          unawaited(lsp.showSignatureHelp());
+        } else {
+          EditorOverlayDemos.showSignatureHelp(_controller);
+        }
+      case 'find':
+        if (lsp != null) {
+          lsp.showFindBar();
+        } else {
+          EditorOverlayDemos.showFindBar(_controller);
+        }
+      case 'hide':
+        if (lsp != null) {
+          lsp.hideAll();
+        } else {
+          EditorOverlayDemos.hideAll(_controller);
+        }
+    }
   }
 
   @override
@@ -331,6 +379,16 @@ class _EditorDemoPageState extends State<EditorDemoPage> with EditorHost {
     );
   }
 
+  Object? _onShowCompletionInvoke(_ShowCompletionIntent intent) {
+    final lsp = _lspOverlays;
+    if (lsp != null) {
+      unawaited(lsp.showCompletion());
+    } else {
+      EditorOverlayDemos.showCompletion(_controller);
+    }
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
     final appearance = widget.appearanceController.appearance;
@@ -344,6 +402,59 @@ class _EditorDemoPageState extends State<EditorDemoPage> with EditorHost {
           ],
         ),
         actions: [
+          PopupMenuButton<String>(
+            tooltip: 'Overlay demos',
+            icon: const Icon(Icons.layers),
+            onSelected: _onOverlayMenu,
+            itemBuilder: (context) => [
+              PopupMenuItem(
+                value: 'completion',
+                child: ListTile(
+                  leading: const Icon(Icons.list_alt),
+                  title: const Text('Completion'),
+                  subtitle: Text(
+                    _lspOverlays != null
+                        ? 'Ctrl+Space (LSP)'
+                        : 'Ctrl+Space (mock)',
+                  ),
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'hover',
+                child: ListTile(
+                  leading: Icon(Icons.info_outline),
+                  title: Text('Hover'),
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'signature',
+                child: ListTile(
+                  leading: Icon(Icons.functions),
+                  title: Text('Signature help'),
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'find',
+                child: ListTile(
+                  leading: Icon(Icons.search),
+                  title: Text('Find bar'),
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+              const PopupMenuDivider(),
+              const PopupMenuItem(
+                value: 'hide',
+                child: ListTile(
+                  leading: Icon(Icons.layers_clear),
+                  title: Text('Hide all overlays'),
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+            ],
+          ),
           PopupMenuButton<DartEditorAppearance>(
             tooltip: 'Цветовая схема',
             initialValue: appearance,
@@ -383,7 +494,28 @@ class _EditorDemoPageState extends State<EditorDemoPage> with EditorHost {
           ),
         ],
       ),
-      body: EditorView(controller: _controller, host: this, showGutter: true),
+      body: Shortcuts(
+        shortcuts: const {
+          SingleActivator(LogicalKeyboardKey.space, control: true):
+              _ShowCompletionIntent(),
+        },
+        child: Actions(
+          actions: {
+            _ShowCompletionIntent: CallbackAction<_ShowCompletionIntent>(
+              onInvoke: _onShowCompletionInvoke,
+            ),
+          },
+          child: EditorView(
+            controller: _controller,
+            host: this,
+            showGutter: true,
+          ),
+        ),
+      ),
     );
   }
+}
+
+final class _ShowCompletionIntent extends Intent {
+  const _ShowCompletionIntent();
 }

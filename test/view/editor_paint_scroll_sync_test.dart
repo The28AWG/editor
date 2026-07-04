@@ -10,7 +10,10 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   test('selection box top matches line block top in document space', () {
     final doc = Document.fromText('aaa\nbbb\nccc\n');
-    final theme = EditorTheme.dark().copyWith(fontFamily: 'monospace', fontSize: 14);
+    final theme = EditorTheme.dark().copyWith(
+      fontFamily: 'monospace',
+      fontSize: 14,
+    );
     final resolver = StyleResolver(
       theme: theme,
       layers: [BaseStyleLayer(theme)],

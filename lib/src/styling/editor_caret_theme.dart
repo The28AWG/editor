@@ -5,10 +5,7 @@ import 'package:flutter/painting.dart';
 /// Внешний вид каретки: цвет и толщина штриха.
 final class EditorCaretAppearance {
   /// Создаёт описание отрисовки каретки.
-  const EditorCaretAppearance({
-    required this.color,
-    this.strokeWidth = 2,
-  });
+  const EditorCaretAppearance({required this.color, this.strokeWidth = 2});
 
   /// Линейная интерполяция между [a] и [b] по [t] (0 — [a], 1 — [b]).
   factory EditorCaretAppearance.lerp(
@@ -71,9 +68,7 @@ final class EditorCaretBlinkTheme {
   factory EditorCaretBlinkTheme.standard(Color visibleColor) =>
       EditorCaretBlinkTheme(
         visible: EditorCaretAppearance(color: visibleColor),
-        hidden: EditorCaretAppearance(
-          color: visibleColor.withValues(alpha: 0),
-        ),
+        hidden: EditorCaretAppearance(color: visibleColor.withValues(alpha: 0)),
       );
 
   /// Отключить мигание, оставив только [visible].

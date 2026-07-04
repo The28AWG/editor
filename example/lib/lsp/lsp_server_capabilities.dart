@@ -9,6 +9,10 @@ final class LspServerCapabilities {
     this.inlayHints = false,
     this.definition = false,
     this.documentLink = false,
+    this.completion = false,
+    this.completionResolve = false,
+    this.hover = false,
+    this.signatureHelp = false,
   });
 
   factory LspServerCapabilities.fromJson(Map<String, dynamic>? json) {
@@ -28,6 +32,12 @@ final class LspServerCapabilities {
       }
     }
 
+    final completionProvider = json['completionProvider'];
+    var completionResolve = false;
+    if (completionProvider is Map<String, dynamic>) {
+      completionResolve = completionProvider['resolveProvider'] == true;
+    }
+
     return LspServerCapabilities(
       documentHighlight: json['documentHighlightProvider'] == true,
       semanticTokens: provider != null,
@@ -39,6 +49,10 @@ final class LspServerCapabilities {
       documentLink:
           json['documentLinkProvider'] != null &&
           json['documentLinkProvider'] != false,
+      completion: completionProvider != null && completionProvider != false,
+      completionResolve: completionResolve,
+      hover: json['hoverProvider'] == true,
+      signatureHelp: json['signatureHelpProvider'] != null,
     );
   }
 
@@ -50,4 +64,8 @@ final class LspServerCapabilities {
   final bool inlayHints;
   final bool definition;
   final bool documentLink;
+  final bool completion;
+  final bool completionResolve;
+  final bool hover;
+  final bool signatureHelp;
 }

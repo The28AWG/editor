@@ -10,8 +10,8 @@ class AppAppearanceScope extends InheritedNotifier<AppAppearanceController> {
   }) : super(notifier: controller);
 
   static AppAppearanceController of(BuildContext context) {
-    final scope =
-        context.dependOnInheritedWidgetOfExactType<AppAppearanceScope>();
+    final scope = context
+        .dependOnInheritedWidgetOfExactType<AppAppearanceScope>();
     assert(scope != null, 'AppAppearanceScope not found in context');
     return scope!.notifier!;
   }

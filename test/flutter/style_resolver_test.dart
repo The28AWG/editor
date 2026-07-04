@@ -15,7 +15,9 @@ void main() {
   group('StyleResolver', () {
     test('decoration overrides base color', () {
       final doc = Document.fromText('hello world');
-      final theme = EditorTheme.dark().copyWith(defaultColor: const Color(0xFFFFFFFF));
+      final theme = EditorTheme.dark().copyWith(
+        defaultColor: const Color(0xFFFFFFFF),
+      );
       final resolver = StyleResolver(
         theme: theme,
         layers: [

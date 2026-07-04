@@ -7,7 +7,8 @@ abstract final class CaretDesiredColumn {
   CaretDesiredColumn._();
 
   /// Столбец UTF-16 на строке [offset].
-  static int at(Document doc, TextOffset offset) => doc.positionAt(offset).column;
+  static int at(Document doc, TextOffset offset) =>
+      doc.positionAt(offset).column;
 
   /// По одному желаемому столбцу на каждую каретку ([Selection.head]).
   static List<int> fromHeads(Document doc, List<Selection> selections) {
@@ -26,11 +27,7 @@ abstract final class CaretDesiredColumn {
   ) {
     final cols = <int>[];
     for (var i = 0; i < selections.length; i++) {
-      cols.add(
-        i < existing.length
-            ? existing[i]
-            : at(doc, selections[i].head),
-      );
+      cols.add(i < existing.length ? existing[i] : at(doc, selections[i].head));
     }
     return cols;
   }

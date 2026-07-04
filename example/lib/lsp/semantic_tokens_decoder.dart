@@ -21,13 +21,12 @@ final class SemanticTokensDecoder {
     List<String>? tokenModifiers,
     Map<String, Color>? colorsByType,
     int? priority,
-  }) =>
-      SemanticTokensDecoder(
-        tokenTypes: tokenTypes ?? this.tokenTypes,
-        tokenModifiers: tokenModifiers ?? this.tokenModifiers,
-        colorsByType: colorsByType ?? this.colorsByType,
-        priority: priority ?? this.priority,
-      );
+  }) => SemanticTokensDecoder(
+    tokenTypes: tokenTypes ?? this.tokenTypes,
+    tokenModifiers: tokenModifiers ?? this.tokenModifiers,
+    colorsByType: colorsByType ?? this.colorsByType,
+    priority: priority ?? this.priority,
+  );
 
   List<StyleSpan> decode(String text, List<int> data) {
     if (data.isEmpty) return const [];

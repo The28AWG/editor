@@ -147,5 +147,6 @@ final class SelectionState {
   }
 
   @override
-  int get hashCode => Object.hash(Object.hashAll(selections), Object.hashAll(desiredColumns));
+  int get hashCode =>
+      Object.hash(Object.hashAll(selections), Object.hashAll(desiredColumns));
 }

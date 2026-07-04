@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:editor/src/api/editor_action.dart';
 import 'package:editor/src/api/editor_host.dart';
 import 'package:editor/src/api/editor_language_service.dart';
+import 'package:editor/src/api/editor_overlay.dart';
 import 'package:editor/src/api/selection_change.dart';
 import 'package:editor/src/diagnostics/diagnostic_decorations.dart';
 import 'package:editor/src/diagnostics/editor_diagnostic.dart';
@@ -156,6 +157,28 @@ final class EditorController extends ChangeNotifier {
 
   /// Focus node, подключённый к [EditorScrollable] для клавиатуры и IME.
   final FocusNode focusNode = FocusNode();
+
+  /// Координатор всплывающих overlay (completion, hover, signature help и т.д.).
+  final EditorOverlayCoordinator overlays = EditorOverlayCoordinator();
+
+  EditorOverlayGeometrySource? _overlayGeometry;
+
+  /// Источник геометрии, подключённый [EditorScrollable]; `null` до mount view.
+  EditorOverlayGeometrySource? get overlayGeometry => _overlayGeometry;
+
+  /// Регистрирует геометрию viewport для [overlays].
+  void attachOverlayGeometry(EditorOverlayGeometrySource source) {
+    _overlayGeometry = source;
+    overlays.geometry = source;
+    overlays.refreshAnchors();
+  }
+
+  /// Снимает геометрию при dispose [EditorScrollable].
+  void detachOverlayGeometry(EditorOverlayGeometrySource source) {
+    if (!identical(_overlayGeometry, source)) return;
+    _overlayGeometry = null;
+    overlays.geometry = null;
+  }
 
   /// Состояние прокрутки и видимых строк, общее с painter представления.
   final ViewportState viewport = ViewportState();

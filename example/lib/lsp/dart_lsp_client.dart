@@ -4,13 +4,16 @@ import 'dart:io';
 
 import 'package:editor/editor.dart';
 import 'package:example/lsp/highlight_debug.dart';
+import 'package:example/lsp/lsp_completion.dart';
 import 'package:example/lsp/lsp_debug.dart';
 import 'package:example/lsp/lsp_diagnostics.dart';
 import 'package:example/lsp/lsp_framing.dart';
+import 'package:example/lsp/lsp_hover.dart';
 import 'package:example/lsp/lsp_inlay_hints.dart';
 import 'package:example/lsp/lsp_location.dart';
 import 'package:example/lsp/lsp_position.dart';
 import 'package:example/lsp/lsp_server_capabilities.dart';
+import 'package:example/lsp/lsp_signature_help.dart';
 import 'package:example/lsp/semantic_tokens_decoder.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -38,6 +41,7 @@ final class DartLspClient {
   String? _syncedText;
   List<dynamic>? _cachedDocumentLinks;
   int _cachedDocumentLinksVersion = -1;
+  final _completionResolveStore = <String, Map<String, dynamic>>{};
 
   /// Text last sent to the server via [syncDocumentText] / [syncDocument].
   String? get lastSyncedText => _syncedText;
@@ -103,6 +107,20 @@ final class DartLspClient {
                   'inlayHint': const {},
                   'definition': const {},
                   'documentLink': const {},
+                  'completion': {
+                    'completionItem': {
+                      'snippetSupport': true,
+                      'documentationFormat': ['markdown', 'plaintext'],
+                    },
+                  },
+                  'hover': {
+                    'contentFormat': ['markdown', 'plaintext'],
+                  },
+                  'signatureHelp': {
+                    'signatureInformation': {
+                      'documentationFormat': ['markdown', 'plaintext'],
+                    },
+                  },
                 },
               },
             })
@@ -358,6 +376,82 @@ final class DartLspClient {
     inlayHints = parsed;
     onInlayHints?.call(parsed);
     return parsed;
+  }
+
+  Future<EditorCompletionList?> completion(
+    String text,
+    Position position, {
+    EditorCompletionTrigger trigger = EditorCompletionTrigger.invoked,
+    String? triggerCharacter,
+  }) async {
+    if (!_ready || !_serverCaps.completion) return null;
+    _pushDocument(text);
+    final params = <String, Object?>{
+      'textDocument': {'uri': documentUri},
+      'position': {'line': position.line, 'character': position.column},
+    };
+    final kind = switch (trigger) {
+      EditorCompletionTrigger.invoked => 1,
+      EditorCompletionTrigger.triggerCharacter => 2,
+      EditorCompletionTrigger.incomplete => 3,
+    };
+    params['context'] = {
+      'triggerKind': kind,
+      'triggerCharacter': ?triggerCharacter,
+    };
+    final result = await _call('textDocument/completion', params);
+    return completionListFromLsp(
+      text,
+      offsetAtLspPosition(text, position),
+      result,
+      _completionResolveStore,
+    );
+  }
+
+  Future<EditorCompletionItem?> resolveCompletionItem(
+    String text,
+    EditorCompletionItem item,
+  ) async {
+    if (!_ready || !_serverCaps.completionResolve) return item;
+    final token = item.resolveToken;
+    if (token == null) return item;
+    final raw = _completionResolveStore[token];
+    if (raw == null) return item;
+    _pushDocument(text);
+    final result = await _call('completionItem/resolve', {
+      'completionItem': raw,
+    });
+    if (result is! Map<String, dynamic>) return item;
+    return completionItemResolvedFromLsp(
+      text,
+      item.textEdit?.range ?? Range(0, 0),
+      result,
+      item,
+      _completionResolveStore,
+    );
+  }
+
+  Future<EditorHover?> hover(String text, Position position) async {
+    if (!_ready || !_serverCaps.hover) return null;
+    _pushDocument(text);
+    final result = await _call('textDocument/hover', {
+      'textDocument': {'uri': documentUri},
+      'position': {'line': position.line, 'character': position.column},
+    });
+    return hoverFromLsp(text, result);
+  }
+
+  Future<EditorSignatureHelp?> signatureHelp(
+    String text,
+    Position position,
+  ) async {
+    if (!_ready || !_serverCaps.signatureHelp) return null;
+    _pushDocument(text);
+    final result = await _call('textDocument/signatureHelp', {
+      'textDocument': {'uri': documentUri},
+      'position': {'line': position.line, 'character': position.column},
+    });
+    return signatureHelpFromLsp(result);
   }
 
   Future<List<StyleSpan>> _requestSemanticTokensFull() async {

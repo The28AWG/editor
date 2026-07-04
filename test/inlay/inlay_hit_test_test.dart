@@ -22,7 +22,10 @@ void main() {
       final nameStart = lineStart + line.indexOf('name');
       final countStart = lineStart + line.indexOf('count');
 
-      final theme = EditorTheme.dark().copyWith(fontFamily: 'monospace', fontSize: 14);
+      final theme = EditorTheme.dark().copyWith(
+        fontFamily: 'monospace',
+        fontSize: 14,
+      );
       final resolver = StyleResolver(
         theme: theme,
         layers: [BaseStyleLayer(theme)],

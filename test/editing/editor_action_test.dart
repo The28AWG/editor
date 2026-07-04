@@ -88,7 +88,9 @@ void main() {
     });
 
     test('moveCaretDown preserves desired column across lines', () {
-      controller = EditorController(initialText: '1234567890\nabc\n123456789012345');
+      controller = EditorController(
+        initialText: '1234567890\nabc\n123456789012345',
+      );
       final start = controller.document.offsetAt(const Position(0, 10));
       controller.setPrimarySelection(Selection(start, start));
       final ctx = EditorActionContext(controller: controller);
@@ -96,12 +98,18 @@ void main() {
         ctx,
         const EditorActionInvocation(EditorActionId.moveCaretDown),
       );
-      expect(controller.selection.primary.head, controller.document.offsetAt(const Position(1, 3)));
+      expect(
+        controller.selection.primary.head,
+        controller.document.offsetAt(const Position(1, 3)),
+      );
       EditorActions.perform(
         ctx,
         const EditorActionInvocation(EditorActionId.moveCaretDown),
       );
-      expect(controller.selection.primary.head, controller.document.offsetAt(const Position(2, 10)));
+      expect(
+        controller.selection.primary.head,
+        controller.document.offsetAt(const Position(2, 10)),
+      );
       expect(controller.selection.desiredColumns, [10]);
     });
 

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:editor/src/api/editor_action.dart';
 import 'package:editor/src/api/editor_controller.dart';
 import 'package:editor/src/api/editor_menu.dart';
+import 'package:editor/src/api/editor_overlay.dart';
 import 'package:editor/src/editing/clipboard_text.dart';
 import 'package:editor/src/highlight/word_bounds.dart';
 import 'package:editor/src/layout/glyph_cache.dart';
@@ -121,6 +122,14 @@ final class _EditorScrollableState extends State<EditorScrollable>
   /// `true`, пока меню открыто: блокирует клавиатуру редактора и меняет focus traversal.
   bool _contextMenuOpen = false;
 
+  /// `true`, пока overlay перехватывает клавиатуру ([EditorOverlayCoordinator.capturesKeyboard]).
+  bool _overlayCapturesKeyboard = false;
+
+  late final _OverlayGeometryBindings _overlayBindings =
+      _OverlayGeometryBindings(this);
+  late final EditorScrollableOverlayGeometry _overlayGeometry =
+      EditorScrollableOverlayGeometry(_overlayBindings);
+
   final GlobalKey _surfaceKey = GlobalKey();
   final GlobalKey _viewportKey = GlobalKey();
 
@@ -186,6 +195,7 @@ final class _EditorScrollableState extends State<EditorScrollable>
     _trackedInlayCount = widget.controller.inlayHints.length;
     _recreateInputHandler();
     widget.controller.addListener(_onControllerChanged);
+    widget.controller.overlays.addListener(_onOverlaysChanged);
     _verticalScroll.addListener(_onVerticalScroll);
     _horizontalScroll.addListener(_onHorizontalScroll);
     widget.controller.focusNode.addListener(_onFocusChanged);
@@ -202,6 +212,7 @@ final class _EditorScrollableState extends State<EditorScrollable>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         widget.controller.focusNode.requestFocus();
+        widget.controller.attachOverlayGeometry(_overlayGeometry);
       }
     });
     _registerLinkModifierHandler();
@@ -271,9 +282,7 @@ final class _EditorScrollableState extends State<EditorScrollable>
 
   /// Подключает или отключает [TextInputConnection] при изменении фокуса.
   void _onFocusChanged() {
-    _syncCaretBlink(
-      recordActivity: widget.controller.focusNode.hasFocus,
-    );
+    _syncCaretBlink(recordActivity: widget.controller.focusNode.hasFocus);
     if (widget.controller.focusNode.hasFocus && _usePlatformTextInput) {
       _textInputClient = EditorTextInputClient(
         widget.controller,
@@ -350,13 +359,36 @@ final class _EditorScrollableState extends State<EditorScrollable>
     );
   }
 
+  void _onOverlaysChanged() {
+    if (!mounted) return;
+    final captures = widget.controller.overlays.capturesKeyboard;
+    if (_overlayCapturesKeyboard != captures) {
+      _setOverlayCapturesKeyboard(captures);
+    }
+    setState(_rebuildFromController);
+  }
+
+  bool get _blocksEditorInput => _contextMenuOpen || _overlayCapturesKeyboard;
+
+  void _setOverlayCapturesKeyboard(bool captures) {
+    if (_overlayCapturesKeyboard == captures) return;
+    widget.controller.focusNode.canRequestFocus =
+        !captures && !_contextMenuOpen;
+    if (mounted) {
+      setState(() => _overlayCapturesKeyboard = captures);
+    } else {
+      _overlayCapturesKeyboard = captures;
+    }
+  }
+
   /// Синхронизирует флаг открытого меню с focus-политикой редактора.
   ///
   /// Пока меню открыто, [FocusNode.canRequestFocus] редактора `false` и при
   /// пересборке [Focus.skipTraversal] — фокус остаётся в overlay меню.
   void _setContextMenuOpen(bool open) {
     if (_contextMenuOpen == open) return;
-    widget.controller.focusNode.canRequestFocus = !open;
+    widget.controller.focusNode.canRequestFocus =
+        !open && !_overlayCapturesKeyboard;
     if (mounted) {
       setState(() => _contextMenuOpen = open);
     } else {
@@ -379,11 +411,22 @@ final class _EditorScrollableState extends State<EditorScrollable>
     widget.controller.focusNode.requestFocus();
   }
 
-  /// Маршрутизирует клавиши: при открытом меню события игнорируются здесь
-  /// (обрабатываются [FocusScope] меню), иначе — [EditorInputHandler].
+  /// Маршрутизирует клавиши: Escape закрывает overlay; при открытом меню события
+  /// игнорируются здесь (обрабатываются [FocusScope] меню), иначе — [EditorInputHandler].
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
-    if (_contextMenuOpen) return KeyEventResult.ignored;
+    if (_tryDismissOverlayOnEscape(event)) return KeyEventResult.handled;
+    if (widget.controller.overlays.dispatchCooperativeKeyEvent(event) ==
+        KeyEventResult.handled) {
+      return KeyEventResult.handled;
+    }
+    if (_blocksEditorInput) return KeyEventResult.ignored;
     return _input.handleKeyEvent(event);
+  }
+
+  bool _tryDismissOverlayOnEscape(KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) return false;
+    if (event.logicalKey != LogicalKeyboardKey.escape) return false;
+    return widget.controller.overlays.dismissOnEscape();
   }
 
   /// Переносит каретку на [offset] перед контекстным меню, если клик вне выделения.
@@ -719,6 +762,13 @@ final class _EditorScrollableState extends State<EditorScrollable>
       _scrollToOffset(reveal, gutterW);
     }
     _syncStyleViewport(notify: false);
+    if (docEdited) {
+      controller.overlays.onDocumentChanged(controller.document.version);
+    }
+    if (caretMoved) {
+      controller.overlays.onSelectionChanged();
+    }
+    controller.overlays.refreshAnchors();
 
     if (_canRepaintWithoutSetState(controller)) {
       _repaintEditorSurface();
@@ -814,6 +864,7 @@ final class _EditorScrollableState extends State<EditorScrollable>
     widget.controller.viewport.firstVisibleLine = _lineLayout
         .lineIndexForDocumentY(offset, theme.lineHeight);
     _syncStyleViewport(notify: false);
+    widget.controller.overlays.onScroll();
     final connection = _textInputConnection;
     if (connection != null) {
       _updateTextInputGeometry(connection);
@@ -823,6 +874,7 @@ final class _EditorScrollableState extends State<EditorScrollable>
   /// Синхронизирует горизонтальное смещение прокрутки для строк без переноса.
   void _onHorizontalScroll() {
     widget.controller.viewport.scrollOffsetX = _horizontalScroll.offset;
+    widget.controller.overlays.onScroll();
     final connection = _textInputConnection;
     if (connection != null) {
       _updateTextInputGeometry(connection);
@@ -834,6 +886,9 @@ final class _EditorScrollableState extends State<EditorScrollable>
   void dispose() {
     _unregisterLinkModifierHandler();
     widget.controller.removeListener(_onControllerChanged);
+    widget.controller.overlays.removeListener(_onOverlaysChanged);
+    final geometry = _overlayGeometry;
+    widget.controller.detachOverlayGeometry(geometry);
     widget.controller.focusNode.removeListener(_onFocusChanged);
     _textInputConnection?.close();
     _clipboardStatus.dispose();
@@ -1329,8 +1384,8 @@ final class _EditorScrollableState extends State<EditorScrollable>
 
     return Focus(
       focusNode: controller.focusNode,
-      skipTraversal: _contextMenuOpen,
-      canRequestFocus: !_contextMenuOpen,
+      skipTraversal: _blocksEditorInput,
+      canRequestFocus: !_blocksEditorInput,
       onKeyEvent: _handleKeyEvent,
       child: LayoutBuilder(
         builder: (context, constraints) {
@@ -1359,15 +1414,63 @@ final class _EditorScrollableState extends State<EditorScrollable>
             });
           }
 
-          return _buildEditorSurface(
-            context: context,
-            controller: controller,
-            gutterW: gutterW,
-            childWidth: childWidth,
-            contentHeight: contentHeight,
+          return Stack(
+            fit: StackFit.expand,
+            children: [
+              _buildEditorSurface(
+                context: context,
+                controller: controller,
+                gutterW: gutterW,
+                childWidth: childWidth,
+                contentHeight: contentHeight,
+              ),
+              ListenableBuilder(
+                listenable: controller.overlays,
+                builder: (context, _) => EditorOverlayStack(
+                  coordinator: controller.overlays,
+                  viewportSize: Size(
+                    constraints.maxWidth,
+                    constraints.maxHeight,
+                  ),
+                ),
+              ),
+            ],
           );
         },
       ),
     );
+  }
+}
+
+final class _OverlayGeometryBindings implements EditorOverlayGeometryBindings {
+  _OverlayGeometryBindings(this._state);
+
+  final _EditorScrollableState _state;
+
+  @override
+  LineLayout get lineLayout => _state._lineLayout;
+
+  @override
+  Document get document => _state.widget.controller.document;
+
+  @override
+  EditorTheme get theme => _state.widget.controller.theme;
+
+  @override
+  SelectionState get selection => _state.widget.controller.selection;
+
+  @override
+  double get gutterWidth => _state.widget.showGutter ? 48.0 : 0.0;
+
+  @override
+  RenderBox? get surfaceBox {
+    final ro = _state._surfaceKey.currentContext?.findRenderObject();
+    return ro is RenderBox && ro.hasSize ? ro : null;
+  }
+
+  @override
+  RenderBox? get viewportBox {
+    final ro = _state._viewportKey.currentContext?.findRenderObject();
+    return ro is RenderBox && ro.hasSize ? ro : null;
   }
 }

@@ -60,11 +60,7 @@ TextOffset cursorLineEnd(Document doc, TextOffset offset) {
 /// Фактический столбец — `min(desiredColumn, длина содержимого строки)`; желаемый
 /// столбец при укорочении строки не сбрасывается (хранится снаружи).
 /// На строке 0 возвращает 0.
-TextOffset cursorMoveUp(
-  Document doc,
-  TextOffset offset,
-  int desiredColumn,
-) {
+TextOffset cursorMoveUp(Document doc, TextOffset offset, int desiredColumn) {
   final pos = doc.positionAt(offset);
   if (pos.line == 0) return 0;
   final prevLine = pos.line - 1;
@@ -77,11 +73,7 @@ TextOffset cursorMoveUp(
 /// Переходит на следующую строку, стремясь к [desiredColumn].
 ///
 /// На последней строке возвращает [Document.length] (конец документа).
-TextOffset cursorMoveDown(
-  Document doc,
-  TextOffset offset,
-  int desiredColumn,
-) {
+TextOffset cursorMoveDown(Document doc, TextOffset offset, int desiredColumn) {
   final pos = doc.positionAt(offset);
   if (pos.line >= doc.lineCount - 1) return doc.length;
   final nextLine = pos.line + 1;

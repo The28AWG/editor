@@ -28,8 +28,7 @@ final class CaretBlinkController extends ChangeNotifier {
   EditorCaretAppearance appearanceFor(EditorCaretBlinkTheme theme) =>
       theme.appearanceAt(_lerpT);
 
-  Duration get _elapsed =>
-      _clock.isRunning ? _clock.elapsed : Duration.zero;
+  Duration get _elapsed => _clock.isRunning ? _clock.elapsed : Duration.zero;
 
   /// Синхронизирует фокус, выделение, IME; при [recordActivity] продлевает solid-паузу.
   void syncWithCachedTheme({

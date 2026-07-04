@@ -458,7 +458,11 @@ abstract final class EditorActions {
           EditorActionId.moveCaretLeft => cursorMoveLeft(doc, head),
           EditorActionId.moveCaretRight => cursorMoveRight(doc, head),
           EditorActionId.moveCaretUp => cursorMoveUp(doc, head, desiredColumn),
-          EditorActionId.moveCaretDown => cursorMoveDown(doc, head, desiredColumn),
+          EditorActionId.moveCaretDown => cursorMoveDown(
+            doc,
+            head,
+            desiredColumn,
+          ),
           EditorActionId.moveCaretLineStart => cursorLineStart(doc, head),
           EditorActionId.moveCaretLineEnd => cursorLineEnd(doc, head),
           _ => null,
@@ -483,9 +487,7 @@ abstract final class EditorActions {
             ? sel.withHead(nextHead)
             : Selection.collapsed(nextHead),
       );
-      nextDesired.add(
-        vertical ? col : CaretDesiredColumn.at(doc, nextHead),
-      );
+      nextDesired.add(vertical ? col : CaretDesiredColumn.at(doc, nextHead));
     }
 
     if (!anyMoved) return false;

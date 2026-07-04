@@ -18,7 +18,10 @@ void main() {
   test('hit-test on "name" matches click X with bold prefix drift', () {
     // "XXname" — первые два символа bold шире, чем в GlyphCache (regular).
     final doc = Document.fromText('XXname');
-    final theme = EditorTheme.dark().copyWith(fontFamily: 'monospace', fontSize: 14);
+    final theme = EditorTheme.dark().copyWith(
+      fontFamily: 'monospace',
+      fontSize: 14,
+    );
     final resolver = StyleResolver(
       theme: theme,
       layers: [

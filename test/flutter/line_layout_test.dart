@@ -14,7 +14,10 @@ void main() {
   group('LineLayout', () {
     test('hit-test offset in monospace line', () {
       final doc = Document.fromText('abcdef');
-      final theme = const EditorTheme.dark().copyWith(fontFamily: 'monospace', fontSize: 14);
+      final theme = const EditorTheme.dark().copyWith(
+        fontFamily: 'monospace',
+        fontSize: 14,
+      );
       final resolver = StyleResolver(
         theme: theme,
         layers: [BaseStyleLayer(theme)],
@@ -37,7 +40,10 @@ void main() {
 
     test('collapsed range produces caret box', () {
       final doc = Document.fromText('ab');
-      final theme = const EditorTheme.dark().copyWith(fontFamily: 'monospace', fontSize: 14);
+      final theme = const EditorTheme.dark().copyWith(
+        fontFamily: 'monospace',
+        fontSize: 14,
+      );
       final resolver = StyleResolver(
         theme: theme,
         layers: [BaseStyleLayer(theme)],
@@ -62,7 +68,10 @@ void main() {
 
     test('click past line text stays before newline', () {
       final doc = Document.fromText('ab\ncd\n');
-      final theme = const EditorTheme.dark().copyWith(fontFamily: 'monospace', fontSize: 14);
+      final theme = const EditorTheme.dark().copyWith(
+        fontFamily: 'monospace',
+        fontSize: 14,
+      );
       final resolver = StyleResolver(
         theme: theme,
         layers: [BaseStyleLayer(theme)],
@@ -84,7 +93,10 @@ void main() {
 
     test('inlay hint shifts layout X after anchor', () {
       final doc = Document.fromText('foo(bar)');
-      final theme = const EditorTheme.dark().copyWith(fontFamily: 'monospace', fontSize: 14);
+      final theme = const EditorTheme.dark().copyWith(
+        fontFamily: 'monospace',
+        fontSize: 14,
+      );
       final resolver = StyleResolver(
         theme: theme,
         layers: [BaseStyleLayer(theme)],
@@ -132,7 +144,10 @@ void main() {
 
     test('totalHeight equals sum of block heights via prefix sums', () {
       final doc = Document.fromText('a\nb\nc\nd\ne');
-      final theme = EditorTheme.dark().copyWith(fontFamily: 'monospace', fontSize: 14);
+      final theme = EditorTheme.dark().copyWith(
+        fontFamily: 'monospace',
+        fontSize: 14,
+      );
       final layout = buildLayout(doc, theme);
       final lineH = layout.lineHeightPx(theme.lineHeight);
       expect(layout.totalHeight(doc.lineCount, theme.lineHeight), lineH * 5);
@@ -144,7 +159,10 @@ void main() {
         // Если у строки 999 top = 999 * lineH, значит префикс-сумма работает.
         final lines = List<String>.generate(1000, (i) => 'x$i').join('\n');
         final doc = Document.fromText(lines);
-        final theme = EditorTheme.dark().copyWith(fontFamily: 'monospace', fontSize: 14);
+        final theme = EditorTheme.dark().copyWith(
+          fontFamily: 'monospace',
+          fontSize: 14,
+        );
         final layout = buildLayout(doc, theme);
         final lineH = layout.lineHeightPx(theme.lineHeight);
         layout.totalHeight(doc.lineCount, theme.lineHeight);
@@ -161,7 +179,10 @@ void main() {
     test('lineIndexForDocumentY uses binary search on prefix sums', () {
       final lines = List<String>.generate(100, (i) => 'l$i').join('\n');
       final doc = Document.fromText(lines);
-      final theme = EditorTheme.dark().copyWith(fontFamily: 'monospace', fontSize: 14);
+      final theme = EditorTheme.dark().copyWith(
+        fontFamily: 'monospace',
+        fontSize: 14,
+      );
       final layout = buildLayout(doc, theme);
       final lineH = layout.lineHeightPx(theme.lineHeight);
       expect(layout.lineIndexForDocumentY(0, theme.lineHeight), 0);
@@ -179,7 +200,10 @@ void main() {
     test('lineIndexAfterDocumentY is exclusive upper bound', () {
       final lines = List<String>.generate(10, (i) => 'l$i').join('\n');
       final doc = Document.fromText(lines);
-      final theme = EditorTheme.dark().copyWith(fontFamily: 'monospace', fontSize: 14);
+      final theme = EditorTheme.dark().copyWith(
+        fontFamily: 'monospace',
+        fontSize: 14,
+      );
       final layout = buildLayout(doc, theme);
       final lineH = layout.lineHeightPx(theme.lineHeight);
       expect(layout.lineIndexAfterDocumentY(-1, theme.lineHeight), 0);
@@ -194,7 +218,10 @@ void main() {
     test('invalidateHeightCache(fromLine) re-uses prefix until fromLine', () {
       final lines = List<String>.generate(10, (i) => 'l$i').join('\n');
       final doc = Document.fromText(lines);
-      final theme = EditorTheme.dark().copyWith(fontFamily: 'monospace', fontSize: 14);
+      final theme = EditorTheme.dark().copyWith(
+        fontFamily: 'monospace',
+        fontSize: 14,
+      );
       final layout = buildLayout(doc, theme);
       final lineH = layout.lineHeightPx(theme.lineHeight);
       layout
@@ -209,7 +236,10 @@ void main() {
     test('truncateToLineCount trims prefix sums', () {
       final lines = List<String>.generate(10, (i) => 'l$i').join('\n');
       final doc = Document.fromText(lines);
-      final theme = EditorTheme.dark().copyWith(fontFamily: 'monospace', fontSize: 14);
+      final theme = EditorTheme.dark().copyWith(
+        fontFamily: 'monospace',
+        fontSize: 14,
+      );
       final layout = buildLayout(doc, theme);
       final lineH = layout.lineHeightPx(theme.lineHeight);
       layout
@@ -225,7 +255,10 @@ void main() {
   group('LineLayout attributed cache', () {
     test('attributedRunsForLine returns identical list on hit', () {
       final doc = Document.fromText('hello\nworld');
-      final theme = EditorTheme.dark().copyWith(fontFamily: 'monospace', fontSize: 14);
+      final theme = EditorTheme.dark().copyWith(
+        fontFamily: 'monospace',
+        fontSize: 14,
+      );
       final resolver = StyleResolver(
         theme: theme,
         layers: [BaseStyleLayer(theme)],
@@ -246,7 +279,10 @@ void main() {
 
     test('invalidate(fromLine) drops attributed cache from that line', () {
       final doc = Document.fromText('a\nb\nc');
-      final theme = EditorTheme.dark().copyWith(fontFamily: 'monospace', fontSize: 14);
+      final theme = EditorTheme.dark().copyWith(
+        fontFamily: 'monospace',
+        fontSize: 14,
+      );
       final resolver = StyleResolver(
         theme: theme,
         layers: [BaseStyleLayer(theme)],
@@ -269,7 +305,10 @@ void main() {
 
     test('invalidateMaxWidthCache skips when max line outside edit range', () {
       final doc = Document.fromText('hi\n${'w' * 60}');
-      final theme = EditorTheme.dark().copyWith(fontFamily: 'monospace', fontSize: 14);
+      final theme = EditorTheme.dark().copyWith(
+        fontFamily: 'monospace',
+        fontSize: 14,
+      );
       final resolver = StyleResolver(
         theme: theme,
         layers: [BaseStyleLayer(theme)],
@@ -291,7 +330,10 @@ void main() {
 
     test('updateResolver drops the entire attributed cache', () {
       final doc = Document.fromText('foo');
-      final theme = EditorTheme.dark().copyWith(fontFamily: 'monospace', fontSize: 14);
+      final theme = EditorTheme.dark().copyWith(
+        fontFamily: 'monospace',
+        fontSize: 14,
+      );
       final resolver = StyleResolver(
         theme: theme,
         layers: [BaseStyleLayer(theme)],

@@ -4,7 +4,7 @@
 
 ## Демо
 
-Приложение [`example/`](example/): подсветка Dart (tree-sitter и LSP), gutter, диагностики и переключаемые темы оформления.
+Приложение [`example/`](example/): подсветка Dart (tree-sitter и LSP), gutter, диагностики, переключаемые темы и **демо overlay** (completion, hover, signature, find bar — меню **Overlays** в app bar, Ctrl+Space для completion).
 
 | VS Code Dark | VS Code Light | Dracula |
 | :---: | :---: | :---: |

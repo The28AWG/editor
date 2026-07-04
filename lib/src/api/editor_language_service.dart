@@ -25,6 +25,8 @@ import 'package:editor/src/navigation/editor_document_location.dart';
 /// | [inlayHints] | `textDocument/inlayHint` |
 /// | [linkTargetAt] | `textDocument/definition`, `textDocument/documentLink` |
 ///
+/// Overlay (completion, hover, signature): [EditorOverlayLanguageService].
+///
 /// ## Пример
 ///
 /// ```dart
