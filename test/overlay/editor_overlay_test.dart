@@ -323,4 +323,46 @@ void main() {
       expect(bounds.size, const Size(800, 600));
     });
   });
+
+  group('overlayUserOffsetFromGlobal', () {
+    test('drag at clamp edge does not accumulate slack', () {
+      const layoutOffset = Offset(100, 50);
+      const viewportOrigin = Offset.zero;
+      const panelSize = Size(200, 120);
+      const bounds = Rect.fromLTWH(0, 0, 400, 300);
+      const grab = Offset(20, 10);
+      const edgeUserOffset = Offset(100, 0);
+      const edgePanelGlobal = Offset(200, 50);
+      final pointerAtEdge = edgePanelGlobal + grab;
+
+      Offset clampedForPointer(Offset pointer) => clampOverlayUserOffset(
+        baseOffset: layoutOffset,
+        userOffset: overlayUserOffsetFromGlobal(
+          panelGlobalTopLeft: pointer - grab,
+          viewportGlobalOrigin: viewportOrigin,
+          layoutOffset: layoutOffset,
+        ),
+        panelSize: panelSize,
+        layoutBounds: bounds,
+      );
+
+      // Указатель ушёл правее края — панель остаётся на месте.
+      expect(
+        clampedForPointer(pointerAtEdge + const Offset(80, 0)),
+        edgeUserOffset,
+      );
+
+      // Небольшой возврат — панель всё ещё на краю.
+      expect(
+        clampedForPointer(pointerAtEdge + const Offset(40, 0)),
+        edgeUserOffset,
+      );
+
+      // Достаточный возврат — панель следует за указателем.
+      expect(
+        clampedForPointer(pointerAtEdge + const Offset(-30, 0)).dx,
+        lessThan(edgeUserOffset.dx),
+      );
+    });
+  });
 }

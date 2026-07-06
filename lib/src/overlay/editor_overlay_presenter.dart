@@ -99,6 +99,7 @@ final class _OverlayPanel extends StatefulWidget {
 final class _OverlayPanelState extends State<_OverlayPanel> {
   final GlobalKey _measureKey = GlobalKey();
   EditorOverlayLayoutResult? _layout;
+  Offset? _dragGrabGlobal;
 
   @override
   void initState() {
@@ -127,27 +128,53 @@ final class _OverlayPanelState extends State<_OverlayPanel> {
     clampToViewport: policy.clampToViewport,
   );
 
-  void _handleDragDelta(Offset delta) {
+  Offset _panelGlobalTopLeft(EditorOverlayLayoutResult layout) {
+    final session = widget.session;
+    return Offset(
+      widget.viewportOrigin.dx + layout.offset.dx + session.userOffset.dx,
+      widget.viewportOrigin.dy + layout.offset.dy + session.userOffset.dy,
+    );
+  }
+
+  Size _panelSize(EditorOverlayLayoutPolicy policy) {
+    final session = widget.session;
+    final measured = session.effectiveSize;
+    if (measured != null) return measured;
+    return Size(
+      policy.preferredWidth ?? policy.minWidth,
+      policy.preferredHeight ?? policy.minHeight,
+    );
+  }
+
+  void _handleDragStart(Offset globalPointer) {
     final layout = _layout;
     if (layout == null) return;
+    _dragGrabGlobal = globalPointer - _panelGlobalTopLeft(layout);
+  }
+
+  void _handleDragUpdate(Offset globalPointer) {
+    final grab = _dragGrabGlobal;
+    final layout = _layout;
+    if (grab == null || layout == null) return;
+
     final session = widget.session;
     final policy = session.descriptor.layout;
-    final panelSize =
-        session.effectiveSize ??
-        Size(
-          policy.preferredWidth ?? policy.minWidth,
-          policy.preferredHeight ?? policy.minHeight,
-        );
-    final bounds = _layoutBoundsFor(policy);
+    final desiredUserOffset = overlayUserOffsetFromGlobal(
+      panelGlobalTopLeft: globalPointer - grab,
+      viewportGlobalOrigin: widget.viewportOrigin,
+      layoutOffset: layout.offset,
+    );
     final next = clampOverlayUserOffset(
       baseOffset: layout.offset,
-      userOffset: session.userOffset + delta,
-      panelSize: panelSize,
-      layoutBounds: bounds,
+      userOffset: desiredUserOffset,
+      panelSize: _panelSize(policy),
+      layoutBounds: _layoutBoundsFor(policy),
       margin: policy.margin,
     );
     session.move(next);
   }
+
+  void _handleDragEnd() => _dragGrabGlobal = null;
 
   @override
   Widget build(BuildContext context) {
@@ -214,7 +241,11 @@ final class _OverlayPanelState extends State<_OverlayPanel> {
     var positionedChild = panel;
     if (policy.draggable) {
       positionedChild = EditorOverlayDragScope(
-        onDragDelta: _handleDragDelta,
+        handlers: EditorOverlayDragHandlers(
+          onStart: _handleDragStart,
+          onUpdate: _handleDragUpdate,
+          onEnd: _handleDragEnd,
+        ),
         child: policy.dragHandle == EditorOverlayDragHandle.header
             ? Column(
                 mainAxisSize: MainAxisSize.min,

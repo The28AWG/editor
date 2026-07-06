@@ -282,6 +282,16 @@ Offset clampOverlayUserOffset({
   return Offset(left - baseOffset.dx, top - baseOffset.dy);
 }
 
+/// [userOffset] из желаемого верхнего левого угла панели в глобальных координатах.
+Offset overlayUserOffsetFromGlobal({
+  required Offset panelGlobalTopLeft,
+  required Offset viewportGlobalOrigin,
+  required Offset layoutOffset,
+}) => Offset(
+  panelGlobalTopLeft.dx - viewportGlobalOrigin.dx - layoutOffset.dx,
+  panelGlobalTopLeft.dy - viewportGlobalOrigin.dy - layoutOffset.dy,
+);
+
 double _childAlignVertical({
   required Rect parent,
   required double childExtent,

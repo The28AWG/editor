@@ -1,24 +1,37 @@
 import 'package:flutter/material.dart';
 
-/// Предоставляет [onDragDelta] потомкам draggable overlay (см. [EditorOverlayPanelDragHandle]).
+/// Колбэки перетаскивания overlay по глобальной позиции указателя.
+final class EditorOverlayDragHandlers {
+  const EditorOverlayDragHandlers({
+    required this.onStart,
+    required this.onUpdate,
+    required this.onEnd,
+  });
+
+  final ValueChanged<Offset> onStart;
+  final ValueChanged<Offset> onUpdate;
+  final VoidCallback onEnd;
+}
+
+/// Предоставляет [EditorOverlayDragHandlers] потомкам draggable overlay.
 final class EditorOverlayDragScope extends InheritedWidget {
   const EditorOverlayDragScope({
-    required this.onDragDelta,
+    required this.handlers,
     required super.child,
     super.key,
   });
 
-  final ValueChanged<Offset> onDragDelta;
+  final EditorOverlayDragHandlers handlers;
 
-  static ValueChanged<Offset>? maybeOf(BuildContext context) {
+  static EditorOverlayDragHandlers? maybeOf(BuildContext context) {
     final scope = context
         .dependOnInheritedWidgetOfExactType<EditorOverlayDragScope>();
-    return scope?.onDragDelta;
+    return scope?.handlers;
   }
 
   @override
   bool updateShouldNotify(EditorOverlayDragScope oldWidget) =>
-      onDragDelta != oldWidget.onDragDelta;
+      handlers != oldWidget.handlers;
 }
 
 /// Drag-зона в [builder] при [EditorOverlayDragHandle.custom].
@@ -29,14 +42,17 @@ final class EditorOverlayPanelDragHandle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final onDragDelta = EditorOverlayDragScope.maybeOf(context);
-    if (onDragDelta == null) return child;
+    final handlers = EditorOverlayDragScope.maybeOf(context);
+    if (handlers == null) return child;
 
     return MouseRegion(
       cursor: SystemMouseCursors.grab,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onPanUpdate: (details) => onDragDelta(details.delta),
+        onPanStart: (details) => handlers.onStart(details.globalPosition),
+        onPanUpdate: (details) => handlers.onUpdate(details.globalPosition),
+        onPanEnd: (_) => handlers.onEnd(),
+        onPanCancel: handlers.onEnd,
         child: child,
       ),
     );
@@ -49,13 +65,18 @@ final class EditorOverlayDragHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final onDragDelta = EditorOverlayDragScope.maybeOf(context);
+    final handlers = EditorOverlayDragScope.maybeOf(context);
     final theme = Theme.of(context);
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onPanUpdate: onDragDelta == null
+      onPanStart: handlers == null
           ? null
-          : (details) => onDragDelta(details.delta),
+          : (details) => handlers.onStart(details.globalPosition),
+      onPanUpdate: handlers == null
+          ? null
+          : (details) => handlers.onUpdate(details.globalPosition),
+      onPanEnd: handlers == null ? null : (_) => handlers.onEnd(),
+      onPanCancel: handlers?.onEnd,
       child: MouseRegion(
         cursor: SystemMouseCursors.grab,
         child: DecoratedBox(
