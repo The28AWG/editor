@@ -1,23 +1,29 @@
 import 'package:editor/src/overlay/editor_overlay_coordinator.dart';
 import 'package:editor/src/overlay/editor_overlay_descriptor.dart';
 import 'package:editor/src/overlay/editor_overlay_draggable.dart';
+import 'package:editor/src/overlay/editor_overlay_geometry.dart';
 import 'package:editor/src/overlay/editor_overlay_keyboard.dart';
 import 'package:editor/src/overlay/editor_overlay_layout.dart';
 import 'package:editor/src/overlay/editor_overlay_resizable.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-/// Отрисовывает стек overlay поверх viewport редактора.
+/// Отрисовывает стек overlay в [OverlayPortal] [EditorView].
+///
+/// Панели позиционируются в глобальных координатах overlay-хоста; якоря
+/// по-прежнему считаются относительно viewport редактора.
 final class EditorOverlayStack extends StatelessWidget {
   const EditorOverlayStack({
     required this.coordinator,
-    required this.viewportSize,
+    required this.geometry,
+    required this.overlayHostSize,
     this.onDismissTop,
     super.key,
   });
 
   final EditorOverlayCoordinator coordinator;
-  final Size viewportSize;
+  final EditorOverlayGeometrySource geometry;
+  final Size overlayHostSize;
   final VoidCallback? onDismissTop;
 
   void _onScrimPointerDown(EditorOverlaySession? top) {
@@ -30,29 +36,40 @@ final class EditorOverlayStack extends StatelessWidget {
     final sessions = coordinator.sessions;
     if (sessions.isEmpty) return const SizedBox.shrink();
 
+    final viewportGlobal = geometry.viewportRectInGlobal();
+    if (viewportGlobal == null) return const SizedBox.shrink();
+
+    final viewportOrigin = viewportGlobal.topLeft;
+    final viewportRectLocal = Offset.zero & viewportGlobal.size;
     final top = coordinator.topSession;
     final scrimDismiss =
         top?.descriptor.dismissPolicy.outsidePointerDown ?? false;
 
-    return Stack(
-      fit: StackFit.expand,
-      clipBehavior: Clip.none,
-      children: [
-        if (scrimDismiss)
-          Positioned.fill(
-            child: Listener(
-              behavior: HitTestBehavior.opaque,
-              onPointerDown: (_) => _onScrimPointerDown(top),
+    return SizedBox(
+      width: overlayHostSize.width,
+      height: overlayHostSize.height,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          if (scrimDismiss)
+            Positioned.fill(
+              child: Listener(
+                behavior: HitTestBehavior.opaque,
+                onPointerDown: (_) => _onScrimPointerDown(top),
+              ),
             ),
-          ),
-        for (final session in sessions)
-          _OverlayPanel(
-            key: ValueKey(session.id),
-            coordinator: coordinator,
-            session: session,
-            viewportSize: viewportSize,
-          ),
-      ],
+          for (final session in sessions)
+            _OverlayPanel(
+              key: ValueKey(session.id),
+              coordinator: coordinator,
+              session: session,
+              geometry: geometry,
+              viewportOrigin: viewportOrigin,
+              viewportRectLocal: viewportRectLocal,
+              overlayHostSize: overlayHostSize,
+            ),
+        ],
+      ),
     );
   }
 }
@@ -61,13 +78,19 @@ final class _OverlayPanel extends StatefulWidget {
   const _OverlayPanel({
     required this.coordinator,
     required this.session,
-    required this.viewportSize,
+    required this.geometry,
+    required this.viewportOrigin,
+    required this.viewportRectLocal,
+    required this.overlayHostSize,
     super.key,
   });
 
   final EditorOverlayCoordinator coordinator;
   final EditorOverlaySession session;
-  final Size viewportSize;
+  final EditorOverlayGeometrySource geometry;
+  final Offset viewportOrigin;
+  final Rect viewportRectLocal;
+  final Size overlayHostSize;
 
   @override
   State<_OverlayPanel> createState() => _OverlayPanelState();
@@ -97,6 +120,13 @@ final class _OverlayPanelState extends State<_OverlayPanel> {
     widget.coordinator.updateMeasuredSize(widget.session.id, box.size);
   }
 
+  Rect _layoutBoundsFor(EditorOverlayLayoutPolicy policy) => overlayLayoutBounds(
+    viewportRectLocal: widget.viewportRectLocal,
+    viewportGlobalOrigin: widget.viewportOrigin,
+    overlayHostSize: widget.overlayHostSize,
+    clampToViewport: policy.clampToViewport,
+  );
+
   void _handleDragDelta(Offset delta) {
     final layout = _layout;
     if (layout == null) return;
@@ -108,11 +138,12 @@ final class _OverlayPanelState extends State<_OverlayPanel> {
           policy.preferredWidth ?? policy.minWidth,
           policy.preferredHeight ?? policy.minHeight,
         );
+    final bounds = _layoutBoundsFor(policy);
     final next = clampOverlayUserOffset(
       baseOffset: layout.offset,
       userOffset: session.userOffset + delta,
       panelSize: panelSize,
-      viewportSize: widget.viewportSize,
+      layoutBounds: bounds,
       margin: policy.margin,
     );
     session.move(next);
@@ -125,29 +156,35 @@ final class _OverlayPanelState extends State<_OverlayPanel> {
     final anchor = session.anchorRect;
     if (anchor == null) return const SizedBox.shrink();
 
-    final viewportRect = Offset.zero & widget.viewportSize;
+    final policy = descriptor.layout;
+    final layoutBounds = _layoutBoundsFor(policy);
     final layout = computeOverlayLayout(
       anchorRect: anchor,
-      viewportRect: viewportRect,
-      policy: descriptor.layout,
+      layoutBounds: layoutBounds,
+      policy: policy,
       contentSize: session.effectiveSize,
       relativeToRect: descriptor.parentId != null ? anchor : null,
     );
     _layout = layout;
 
+    final globalLeft =
+        widget.viewportOrigin.dx + layout.offset.dx + session.userOffset.dx;
+    final globalTop =
+        widget.viewportOrigin.dy + layout.offset.dy + session.userOffset.dy;
+
     var content = descriptor.builder(context, session);
 
-    if (descriptor.layout.resizable) {
+    if (policy.resizable) {
       final initial = Size(
-        descriptor.layout.preferredWidth ?? layout.maxWidth,
-        descriptor.layout.preferredHeight ?? 200,
+        policy.preferredWidth ?? layout.maxWidth,
+        policy.preferredHeight ?? 200,
       );
       content = EditorResizablePanel(
         key: _measureKey,
         initialSize: session.userSize ?? initial,
-        minSize: Size(descriptor.layout.minWidth, descriptor.layout.minHeight),
+        minSize: Size(policy.minWidth, policy.minHeight),
         maxSize: Size(layout.maxWidth, layout.maxHeight),
-        handle: descriptor.layout.resizeHandle,
+        handle: policy.resizeHandle,
         onResize: session.resize,
         child: Material(
           elevation: 4,
@@ -175,10 +212,10 @@ final class _OverlayPanelState extends State<_OverlayPanel> {
         : content;
 
     var positionedChild = panel;
-    if (descriptor.layout.draggable) {
+    if (policy.draggable) {
       positionedChild = EditorOverlayDragScope(
         onDragDelta: _handleDragDelta,
-        child: descriptor.layout.dragHandle == EditorOverlayDragHandle.header
+        child: policy.dragHandle == EditorOverlayDragHandle.header
             ? Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -189,14 +226,14 @@ final class _OverlayPanelState extends State<_OverlayPanel> {
     }
 
     return Positioned(
-      left: layout.offset.dx + session.userOffset.dx,
-      top: layout.offset.dy + session.userOffset.dy,
+      left: globalLeft,
+      top: globalTop,
       child: ConstrainedBox(
         constraints: BoxConstraints(
           maxWidth: layout.maxWidth,
           maxHeight: layout.maxHeight,
-          minWidth: descriptor.layout.minWidth,
-          minHeight: descriptor.layout.minHeight,
+          minWidth: policy.minWidth,
+          minHeight: policy.minHeight,
         ),
         child: positionedChild,
       ),

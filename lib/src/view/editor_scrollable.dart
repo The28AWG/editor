@@ -1414,27 +1414,12 @@ final class _EditorScrollableState extends State<EditorScrollable>
             });
           }
 
-          return Stack(
-            fit: StackFit.expand,
-            children: [
-              _buildEditorSurface(
-                context: context,
-                controller: controller,
-                gutterW: gutterW,
-                childWidth: childWidth,
-                contentHeight: contentHeight,
-              ),
-              ListenableBuilder(
-                listenable: controller.overlays,
-                builder: (context, _) => EditorOverlayStack(
-                  coordinator: controller.overlays,
-                  viewportSize: Size(
-                    constraints.maxWidth,
-                    constraints.maxHeight,
-                  ),
-                ),
-              ),
-            ],
+          return _buildEditorSurface(
+            context: context,
+            controller: controller,
+            gutterW: gutterW,
+            childWidth: childWidth,
+            contentHeight: contentHeight,
           );
         },
       ),

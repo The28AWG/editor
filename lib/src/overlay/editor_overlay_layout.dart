@@ -45,6 +45,8 @@ final class EditorOverlayLayoutPolicy {
 
   final EditorOverlayPlacement placement;
   final bool flipIfOverflow;
+
+  /// `true` — удерживать панель внутри viewport [EditorView]; `false` — в пределах overlay-хоста.
   final bool clampToViewport;
   final double gap;
   final EdgeInsets margin;
@@ -99,10 +101,10 @@ final class EditorOverlayLayoutResult {
   final EditorOverlayPlacement effectivePlacement;
 }
 
-/// Вычисляет позицию overlay в локальных координатах [viewportRect].
+/// Вычисляет позицию overlay в локальных координатах [layoutBounds].
 EditorOverlayLayoutResult computeOverlayLayout({
   required Rect anchorRect,
-  required Rect viewportRect,
+  required Rect layoutBounds,
   required EditorOverlayLayoutPolicy policy,
   Size? contentSize,
   Rect? relativeToRect,
@@ -110,8 +112,9 @@ EditorOverlayLayoutResult computeOverlayLayout({
   final anchor = relativeToRect ?? anchorRect;
   final margin = policy.margin;
   final isChild = relativeToRect != null;
-  final vw = viewportRect.width - margin.horizontal;
-  final vh = viewportRect.height - margin.vertical;
+  final vw = layoutBounds.width - margin.horizontal;
+  final vh = layoutBounds.height - margin.vertical;
+  final boundsOrigin = layoutBounds.topLeft;
 
   var maxW = policy.maxWidth ?? vw;
   var maxH = policy.maxHeight ?? vh;
@@ -183,15 +186,17 @@ EditorOverlayLayoutResult computeOverlayLayout({
 
   if (policy.flipIfOverflow) {
     final belowOverflow =
-        pos.dy + prefH > vh + margin.top &&
+        pos.dy + prefH > boundsOrigin.dy + vh + margin.top &&
         placement == EditorOverlayPlacement.below;
     final aboveOverflow =
-        pos.dy < margin.top && placement == EditorOverlayPlacement.above;
+        pos.dy < boundsOrigin.dy + margin.top &&
+        placement == EditorOverlayPlacement.above;
     final endOverflow =
-        pos.dx + prefW > vw + margin.left &&
+        pos.dx + prefW > boundsOrigin.dx + vw + margin.left &&
         placement == EditorOverlayPlacement.besideEnd;
     final startOverflow =
-        pos.dx < margin.left && placement == EditorOverlayPlacement.besideStart;
+        pos.dx < boundsOrigin.dx + margin.left &&
+        placement == EditorOverlayPlacement.besideStart;
 
     if (belowOverflow) {
       placement = EditorOverlayPlacement.above;
@@ -212,14 +217,14 @@ EditorOverlayLayoutResult computeOverlayLayout({
   top = pos.dy + margin.top;
 
   if (policy.clampToViewport) {
-    if (left + prefW > margin.left + vw) {
-      left = margin.left + vw - prefW;
-    }
-    if (left < margin.left) left = margin.left;
-    if (top + prefH > margin.top + vh) {
-      top = margin.top + vh - prefH;
-    }
-    if (top < margin.top) top = margin.top;
+    final minLeft = boundsOrigin.dx + margin.left;
+    final minTop = boundsOrigin.dy + margin.top;
+    final maxLeft = boundsOrigin.dx + margin.left + vw - prefW;
+    final maxTop = boundsOrigin.dy + margin.top + vh - prefH;
+    if (left > maxLeft) left = maxLeft;
+    if (left < minLeft) left = minLeft;
+    if (top > maxTop) top = maxTop;
+    if (top < minTop) top = minTop;
   }
 
   return EditorOverlayLayoutResult(
@@ -230,25 +235,47 @@ EditorOverlayLayoutResult computeOverlayLayout({
   );
 }
 
-/// Ограничивает пользовательское смещение, чтобы панель оставалась в viewport.
+/// Границы layout в координатах viewport редактора.
+///
+/// [clampToViewport] `true` — только видимая область [EditorView] (поведение по умолчанию).
+/// `false` — весь overlay-хост (экран), панель может выходить за край viewport.
+Rect overlayLayoutBounds({
+  required Rect viewportRectLocal,
+  required Offset viewportGlobalOrigin,
+  required Size overlayHostSize,
+  required bool clampToViewport,
+}) {
+  if (clampToViewport) return viewportRectLocal;
+  return Rect.fromLTWH(
+    -viewportGlobalOrigin.dx,
+    -viewportGlobalOrigin.dy,
+    overlayHostSize.width,
+    overlayHostSize.height,
+  );
+}
+
+/// Ограничивает пользовательское смещение в пределах [layoutBounds].
 Offset clampOverlayUserOffset({
   required Offset baseOffset,
   required Offset userOffset,
   required Size panelSize,
-  required Size viewportSize,
+  required Rect layoutBounds,
   EdgeInsets margin = EdgeInsets.zero,
+  bool clamp = true,
 }) {
+  if (!clamp) return userOffset;
+
   var left = baseOffset.dx + userOffset.dx;
   var top = baseOffset.dy + userOffset.dy;
-  final minLeft = margin.left;
-  final minTop = margin.top;
-  final maxLeft = viewportSize.width - margin.right - panelSize.width;
-  final maxTop = viewportSize.height - margin.bottom - panelSize.height;
+  final minLeft = layoutBounds.left + margin.left;
+  final minTop = layoutBounds.top + margin.top;
+  final maxLeft = layoutBounds.right - margin.right - panelSize.width;
+  final maxTop = layoutBounds.bottom - margin.bottom - panelSize.height;
 
-  left = panelSize.width <= viewportSize.width - margin.horizontal
+  left = panelSize.width <= layoutBounds.width - margin.horizontal
       ? left.clamp(minLeft, maxLeft)
       : minLeft;
-  top = panelSize.height <= viewportSize.height - margin.vertical
+  top = panelSize.height <= layoutBounds.height - margin.vertical
       ? top.clamp(minTop, maxTop)
       : minTop;
 

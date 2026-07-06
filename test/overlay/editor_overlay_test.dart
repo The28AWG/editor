@@ -16,7 +16,7 @@ void main() {
     test('places below anchor by default', () {
       final result = computeOverlayLayout(
         anchorRect: anchor,
-        viewportRect: viewport,
+        layoutBounds: viewport,
         policy: const EditorOverlayLayoutPolicy(gap: 4),
       );
       expect(result.effectivePlacement, EditorOverlayPlacement.below);
@@ -28,7 +28,7 @@ void main() {
       final lowAnchor = const Rect.fromLTWH(10, 280, 8, 20);
       final result = computeOverlayLayout(
         anchorRect: lowAnchor,
-        viewportRect: viewport,
+        layoutBounds: viewport,
         policy: const EditorOverlayLayoutPolicy(gap: 4, preferredHeight: 120),
       );
       expect(result.effectivePlacement, EditorOverlayPlacement.above);
@@ -38,7 +38,7 @@ void main() {
     test('besideEnd places panel to the right', () {
       final result = computeOverlayLayout(
         anchorRect: anchor,
-        viewportRect: viewport,
+        layoutBounds: viewport,
         policy: const EditorOverlayLayoutPolicy(
           placement: EditorOverlayPlacement.besideEnd,
           preferredWidth: 200,
@@ -52,7 +52,7 @@ void main() {
       const parentPanel = Rect.fromLTWH(40, 80, 180, 120);
       final result = computeOverlayLayout(
         anchorRect: parentPanel,
-        viewportRect: viewport,
+        layoutBounds: viewport,
         policy: const EditorOverlayLayoutPolicy(
           placement: EditorOverlayPlacement.besideEnd,
           preferredHeight: 100,
@@ -67,7 +67,7 @@ void main() {
       const parentPanel = Rect.fromLTWH(40, 80, 180, 120);
       final result = computeOverlayLayout(
         anchorRect: parentPanel,
-        viewportRect: viewport,
+        layoutBounds: viewport,
         policy: const EditorOverlayLayoutPolicy(
           placement: EditorOverlayPlacement.besideEnd,
           childAlign: EditorOverlayChildAlign.center,
@@ -285,14 +285,42 @@ void main() {
     test('keeps panel inside viewport', () {
       const base = Offset(100, 80);
       const panel = Size(200, 120);
-      const viewport = Size(400, 300);
+      const bounds = Rect.fromLTWH(0, 0, 400, 300);
       final clamped = clampOverlayUserOffset(
         baseOffset: base,
         userOffset: const Offset(500, 500),
         panelSize: panel,
-        viewportSize: viewport,
+        layoutBounds: bounds,
       );
       expect(base + clamped, const Offset(200, 180));
+    });
+
+    test('allows negative offset when clamp is disabled', () {
+      const base = Offset(10, 10);
+      const bounds = Rect.fromLTWH(0, 0, 400, 300);
+      final result = clampOverlayUserOffset(
+        baseOffset: base,
+        userOffset: const Offset(-50, -20),
+        panelSize: const Size(100, 50),
+        layoutBounds: bounds,
+        clamp: false,
+      );
+      expect(result, const Offset(-50, -20));
+    });
+  });
+
+  group('overlayLayoutBounds', () {
+    test('expands beyond viewport when clampToViewport is false', () {
+      const viewport = Rect.fromLTWH(0, 0, 400, 300);
+      final bounds = overlayLayoutBounds(
+        viewportRectLocal: viewport,
+        viewportGlobalOrigin: const Offset(100, 200),
+        overlayHostSize: const Size(800, 600),
+        clampToViewport: false,
+      );
+      expect(bounds.left, -100);
+      expect(bounds.top, -200);
+      expect(bounds.size, const Size(800, 600));
     });
   });
 }

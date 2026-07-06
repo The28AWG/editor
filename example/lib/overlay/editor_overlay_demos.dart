@@ -116,6 +116,7 @@ void greet(String name, {int count = 1})
             layout: const EditorOverlayLayoutPolicy(
               placement: EditorOverlayPlacement.besideEnd,
               childAlign: EditorOverlayChildAlign.start,
+              clampToViewport: false,
               resizable: true,
               draggable: true,
               dragHandle: EditorOverlayDragHandle.custom,

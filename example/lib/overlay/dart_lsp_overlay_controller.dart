@@ -104,6 +104,7 @@ final class DartLspOverlayController {
             layout: const EditorOverlayLayoutPolicy(
               placement: EditorOverlayPlacement.besideEnd,
               childAlign: EditorOverlayChildAlign.start,
+              clampToViewport: false,
               resizable: true,
               draggable: true,
               dragHandle: EditorOverlayDragHandle.custom,

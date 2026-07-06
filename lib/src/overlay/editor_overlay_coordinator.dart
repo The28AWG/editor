@@ -9,6 +9,9 @@ import 'package:flutter/widgets.dart';
 final class EditorOverlayCoordinator extends ChangeNotifier {
   EditorOverlayGeometrySource? geometry;
 
+  /// Размер overlay-хоста (экран); задаётся [EditorView] для `clampToViewport: false`.
+  Size? overlayHostSize;
+
   final List<_OverlayEntry> _entries = [];
   int _documentVersion = -1;
 
@@ -183,7 +186,7 @@ final class EditorOverlayCoordinator extends ChangeNotifier {
     }
     final layout = computeOverlayLayout(
       anchorRect: anchor,
-      viewportRect: viewport,
+      layoutBounds: _layoutBoundsFor(parent.descriptor.layout),
       policy: parent.descriptor.layout,
       contentSize: size,
     );
@@ -192,6 +195,22 @@ final class EditorOverlayCoordinator extends ChangeNotifier {
       layout.offset.dy,
       size.width,
       size.height,
+    );
+  }
+
+  Rect _layoutBoundsFor(EditorOverlayLayoutPolicy policy) {
+    final viewport = _viewportRectLocal();
+    if (viewport == null) return Offset.zero & (overlayHostSize ?? Size.zero);
+    if (policy.clampToViewport || overlayHostSize == null) return viewport;
+    final geo = geometry;
+    if (geo == null) return viewport;
+    final global = geo.viewportRectInGlobal();
+    if (global == null) return viewport;
+    return overlayLayoutBounds(
+      viewportRectLocal: viewport,
+      viewportGlobalOrigin: global.topLeft,
+      overlayHostSize: overlayHostSize!,
+      clampToViewport: false,
     );
   }
 
