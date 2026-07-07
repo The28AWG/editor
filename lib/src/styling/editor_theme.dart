@@ -62,6 +62,11 @@ final class EditorTheme {
     required this.inlayHintTypeColor,
     required this.inlayHintParameterColor,
     required this.inlayHintOtherColor,
+    this.regionBlockPaddingX = 1.0,
+    this.regionBlockPaddingY = 1.0,
+    this.regionBlockBorderWidth = 1.0,
+    this.regionBlockCornerRadius = 4.0,
+    this.regionBlockBorderColor = const Color(0xFFB0B0B0),
     this.caretBlinkOverride,
   });
 
@@ -98,7 +103,12 @@ final class EditorTheme {
       diagnosticErrorLineColor = const Color(0x22F48771),
       inlayHintTypeColor = const Color(0x99808080),
       inlayHintParameterColor = const Color(0x99808080),
-      inlayHintOtherColor = const Color(0x99808080);
+      inlayHintOtherColor = const Color(0x99808080),
+      regionBlockPaddingX = 1.0,
+      regionBlockPaddingY = 1.0,
+      regionBlockBorderWidth = 1.0,
+      regionBlockCornerRadius = 4.0,
+      regionBlockBorderColor = const Color(0xFFB0B0B0);
 
   /// Светлая тема в стиле VS Code Light+.
   const EditorTheme.light()
@@ -133,7 +143,12 @@ final class EditorTheme {
       diagnosticErrorLineColor = const Color(0x22E51400),
       inlayHintTypeColor = const Color(0x99757575),
       inlayHintParameterColor = const Color(0x99757575),
-      inlayHintOtherColor = const Color(0x99757575);
+      inlayHintOtherColor = const Color(0x99757575),
+      regionBlockPaddingX = 1.0,
+      regionBlockPaddingY = 1.0,
+      regionBlockBorderWidth = 1.0,
+      regionBlockCornerRadius = 4.0,
+      regionBlockBorderColor = const Color(0xFF606060);
 
   /// Переопределение [caretBlink]; если `null` — из [caretColor].
   final EditorCaretBlinkTheme? caretBlinkOverride;
@@ -237,6 +252,30 @@ final class EditorTheme {
   /// Цвет текста inlay-подсказки для прочих видов подсказок.
   final Color inlayHintOtherColor;
 
+  /// Внешний отступ блока-рамки по X (в логических пикселях).
+  ///
+  /// Увеличивает контур наружу по горизонтали.
+  final double regionBlockPaddingX;
+
+  /// Внутренний отступ блока-рамки по Y (в логических пикселях).
+  ///
+  /// Применяется как inset внутрь высоты визуальной строки, чтобы рамки не
+  /// пересекались между строками из-за вертикального padding'а.
+  final double regionBlockPaddingY;
+
+  /// Толщина рамки блока-рамки (в логических пикселях).
+  ///
+  /// Рамка рисуется внутрь фигуры (fill-полосой), поэтому не «вылезает» наружу.
+  final double regionBlockBorderWidth;
+
+  /// Радиус скругления углов рамки блока-рамки (в логических пикселях).
+  final double regionBlockCornerRadius;
+
+  /// Цвет рамки блока-рамки по умолчанию.
+  ///
+  /// Используется, когда у [EditorRegionBlock] не задан `borderColor`.
+  final Color regionBlockBorderColor;
+
   /// Копия с подстановкой полей.
   EditorTheme copyWith({
     Color? backgroundColor,
@@ -271,6 +310,11 @@ final class EditorTheme {
     Color? inlayHintTypeColor,
     Color? inlayHintParameterColor,
     Color? inlayHintOtherColor,
+    double? regionBlockPaddingX,
+    double? regionBlockPaddingY,
+    double? regionBlockBorderWidth,
+    double? regionBlockCornerRadius,
+    Color? regionBlockBorderColor,
   }) => EditorTheme(
     backgroundColor: backgroundColor ?? this.backgroundColor,
     currentLineColor: currentLineColor ?? this.currentLineColor,
@@ -315,6 +359,14 @@ final class EditorTheme {
     inlayHintParameterColor:
         inlayHintParameterColor ?? this.inlayHintParameterColor,
     inlayHintOtherColor: inlayHintOtherColor ?? this.inlayHintOtherColor,
+    regionBlockPaddingX: regionBlockPaddingX ?? this.regionBlockPaddingX,
+    regionBlockPaddingY: regionBlockPaddingY ?? this.regionBlockPaddingY,
+    regionBlockBorderWidth:
+        regionBlockBorderWidth ?? this.regionBlockBorderWidth,
+    regionBlockCornerRadius:
+        regionBlockCornerRadius ?? this.regionBlockCornerRadius,
+    regionBlockBorderColor:
+        regionBlockBorderColor ?? this.regionBlockBorderColor,
   );
 
   /// Высота строки в пикселях (`fontSize * lineHeight`).

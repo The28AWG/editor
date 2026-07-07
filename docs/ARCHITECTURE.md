@@ -221,6 +221,9 @@ lib/
       editor_action.dart
       editor_menu.dart
       selection_change.dart
+    decorations/
+      editor_region_block.dart      # модель блока-рамки
+      region_block_geometry.dart    # геометрия/развод пересечений (тестируемая)
     diagnostics/
     highlight/
     inlay/
@@ -301,10 +304,54 @@ Example: `DartSyntaxHighlighter` — debounce full `semanticTokens`, немед�
 **EditorLayersPainter** / **EditorScrollable** (снизу вверх):
 
 1. Фон, current line, gutter (опционально)
-2. Текст по **AttributedRun** (`GlyphCache`, моноширинный/пропорциональный шрифт)
-3. Inlay hints (виртуальные аннотации)
-4. Selection, carets
-5. Diagnostics / link underline
+2. Блоки-рамки (**EditorRegionBlock**, см. §6.1)
+3. Текст по **AttributedRun** (`GlyphCache`, моноширинный/пропорциональный шрифт)
+4. Inlay hints (виртуальные аннотации)
+5. Selection, carets
+6. Diagnostics / link underline
+
+### 6.1 Блоки-рамки (визуальные регионы)
+
+**Задача:** подсветить не «выделение текстом», а **визуальный блок** — рамка и опциональная заливка вокруг непрерывного `Range`, который может быть многострочным и иметь разную ширину на разных строках (как подсветка SQL-запроса в DataGrip).
+
+| Компонент | Роль |
+|-----------|------|
+| [EditorRegionBlock](../lib/src/decorations/editor_region_block.dart) | Модель: `range`, `borderColor?`, `fillColor?`, `id?` |
+| [RegionBlockGeometry](../lib/src/decorations/region_block_geometry.dart) | Геометрия без Canvas: нормализация rect'ов, детектор и развод пересечений (unit-тестируемые) |
+| [EditorController.setRegionBlocks](../lib/src/api/editor_controller.dart) | Хранение списка блоков + `notifyListeners` |
+| [EditorLayersPainter](../lib/src/view/layers/editor_layers_painter.dart) | Отрисовка: ступенчатый контур, заливка, рамка «внутрь» |
+
+**Использование (хост):**
+
+```dart
+controller.setRegionBlocks([
+  EditorRegionBlock(
+    range: Range(10, 45),
+    // borderColor можно не задавать — возьмётся из темы.
+    fillColor: const Color(0x224C8BF5),
+  ),
+]);
+```
+
+**Внешний вид задаёт тема** ([EditorTheme](../lib/src/styling/editor_theme.dart)), а не модель блока:
+
+| Поле темы | Назначение |
+|-----------|------------|
+| `regionBlockPaddingX` | Внешний отступ контура по X |
+| `regionBlockPaddingY` | Отступ по Y как **inset внутрь строки** (блок не выходит за высоту визуальной строки) |
+| `regionBlockBorderWidth` | Толщина рамки; рамка рисуется **внутрь** фигуры (`clipPath` + stroke удвоенной толщины) |
+| `regionBlockCornerRadius` | Радиус скругления углов однострочного блока |
+| `regionBlockBorderColor` | Цвет рамки по умолчанию, когда `EditorRegionBlock.borderColor == null` |
+
+**Геометрия и инварианты:**
+
+- Прямоугольники по визуальным строкам даёт `LineLayout.getBoxesForRange` — высота сегмента равна высоте визуальной строки, ширина повторяет фактическую ширину текста.
+- Многострочный блок рисуется **единым ступенчатым контуром**: правая грань идёт сверху вниз со «ступеньками», левая — снизу вверх; между строками нет внутренних линий.
+- **Развод пересечений** (`RegionBlockGeometry.avoidOverlaps`): пересекающиеся по X и Y сегменты разных блоков не рисуются друг на друге — более левый сегмент **сужается** (сегменты не сдвигаются). Конфликт ищется по любой паре сегментов, без группировки по строкам.
+- **Вложенные блоки не режутся**: если один `range` полностью содержит другой, внешний блок остаётся целым, внутренний рисуется поверх. Порядок отрисовки — в два прохода: сначала заливки всех блоков, затем рамки; рамки внешних (более длинных `range`) рисуются последними.
+- Блоки — чисто визуальный слой: не участвуют в hit-test, не меняют selection и текст.
+
+Тесты геометрии: [test/decorations/region_block_overlap_test.dart](../test/decorations/region_block_overlap_test.dart).
 
 **Оптимизации для больших файлов:**
 
@@ -437,7 +484,7 @@ controller.overlays.show(
 
 - `document`, `selection`, `viewport`, `resolver`, `theme`
 - `apply`, `executeCommand`, `perform`, `undo` / `redo`
-- `setHost`, `setDiagnostics`, `setLanguageService`, `refreshStyleLayers`
+- `setHost`, `setDiagnostics`, `setRegionBlocks`, `setLanguageService`, `refreshStyleLayers`
 - `overlays` ([EditorOverlayCoordinator]), `overlayGeometry`, `attachOverlayGeometry`
 - `styleViewport`, `syncStyleViewportFromEditorState`, `computeStyleViewportScope`
 - `readOnly`, `ChangeNotifier`
@@ -492,6 +539,7 @@ class EditorView extends StatefulWidget {
 | EditorView, scroll, gutter, selection, caret | ✅ |
 | Viewport-aware syntax, pending shift, span mask | ✅ |
 | Diagnostics, inlay hints | ✅ |
+| Блоки-рамки (EditorRegionBlock) | ✅ |
 | EditorLanguageService (API) | ✅ |
 | EditorActionId, меню, clipboard | ✅ |
 | Link navigation (Ctrl+клик) | ✅ |

@@ -5,6 +5,7 @@ import 'package:editor/src/api/editor_host.dart';
 import 'package:editor/src/api/editor_language_service.dart';
 import 'package:editor/src/api/editor_overlay.dart';
 import 'package:editor/src/api/selection_change.dart';
+import 'package:editor/src/decorations/editor_region_block.dart';
 import 'package:editor/src/diagnostics/diagnostic_decorations.dart';
 import 'package:editor/src/diagnostics/editor_diagnostic.dart';
 import 'package:editor/src/diagnostics/inline_diagnostic_label.dart';
@@ -264,6 +265,7 @@ final class EditorController extends ChangeNotifier {
   List<StyleSpan> _cachedDiagnosticSpans = const [];
   List<InlineDiagnosticLabel> _inlineDiagnosticLabels = const [];
   List<EditorInlayHint> _inlayHints = const [];
+  List<EditorRegionBlock> _regionBlocks = const [];
 
   /// Счётчик async-запросов inlay hints.
   var _inlayRequestGeneration = 0;
@@ -287,6 +289,13 @@ final class EditorController extends ChangeNotifier {
   /// Диагностика от LSP или хоста (волнистые подчёркивания + фон строк).
   List<EditorDiagnostic> get diagnostics =>
       List<EditorDiagnostic>.unmodifiable(_diagnostics);
+
+  /// Декоративные «рамки вокруг текста» ([EditorRegionBlock]).
+  ///
+  /// Чисто визуальный слой поверх текста; не влияет на выделение, каретку,
+  /// hit-test или редактирование. Задаётся хостом через [setRegionBlocks].
+  List<EditorRegionBlock> get regionBlocks =>
+      List<EditorRegionBlock>.unmodifiable(_regionBlocks);
 
   /// «Призрачные» сообщения после кода на каждой строке; производятся из [diagnostics].
   List<InlineDiagnosticLabel> get inlineDiagnosticLabels =>
@@ -323,6 +332,16 @@ final class EditorController extends ChangeNotifier {
     _diagnostics = List<EditorDiagnostic>.of(value);
     _refreshDiagnosticDecorations();
     _rebuildResolver();
+    notifyListeners();
+  }
+
+  /// Заменяет декоративные блоки-рамки и перерисовывает поверхность.
+  ///
+  /// Блоки рисуются как ступенчатые контуры поверх текста (см.
+  /// [EditorRegionBlock]); порядок в списке задаёт порядок отрисовки.
+  /// Передача пустого списка убирает все рамки.
+  void setRegionBlocks(List<EditorRegionBlock> value) {
+    _regionBlocks = List<EditorRegionBlock>.of(value);
     notifyListeners();
   }
 

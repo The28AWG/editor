@@ -1,4 +1,6 @@
 import 'package:editor/src/api/editor_controller.dart';
+import 'package:editor/src/decorations/editor_region_block.dart';
+import 'package:editor/src/decorations/region_block_geometry.dart';
 import 'package:editor/src/diagnostics/diagnostic_decorations.dart'
     show diagnosticInlineMessageColor;
 import 'package:editor/src/diagnostics/inline_diagnostic_label.dart';
@@ -7,6 +9,7 @@ import 'package:editor/src/inlay/inlay_hint_style.dart';
 import 'package:editor/src/layout/glyph_cache.dart';
 import 'package:editor/src/layout/line_layout.dart';
 import 'package:editor/src/layout/line_text_metrics.dart';
+import 'package:editor/src/layout/text_box.dart';
 import 'package:editor/src/layout/visual_line.dart';
 import 'package:editor/src/model/position.dart';
 import 'package:editor/src/model/text_code_units.dart';
@@ -92,6 +95,8 @@ final class EditorLayersPainter extends CustomPainter {
         ..save()
         ..clipRect(Rect.fromLTWH(0, scroll, size.width, viewH));
     }
+
+    _paintRegionBlocks(canvas, textOffsetX);
 
     // Прыгаем к первой строке, чьё нижнее ребро ещё в viewport: без word-wrap
     // это O(1), с переносом — O(log n) через _blockTops. Так paint больше не
@@ -190,6 +195,162 @@ final class EditorLayersPainter extends CustomPainter {
       }
     }
   }
+
+  /// Рисует декоративные блоки-рамки ([EditorRegionBlock]) поверх фона.
+  ///
+  /// Каждый блок отрисовывается независимо по собственному ступенчатому
+  /// контуру, поэтому несколько блоков на одной строке не сливаются.
+  void _paintRegionBlocks(Canvas canvas, double textOffsetX) {
+    final blocks = controller.regionBlocks;
+    if (blocks.isEmpty) return;
+
+    final lineHeightFactor = controller.theme.lineHeight;
+    final prepared = <RegionBlockRects>[];
+    final theme = controller.theme;
+    for (final block in blocks) {
+      final boxes = lineLayout.getBoxesForRange(block.range, lineHeightFactor);
+      if (boxes.isEmpty) continue;
+      final rawRects = _rectsForBoxes(boxes, textOffsetX, 0);
+      final normalized = RegionBlockGeometry.normalizeRectsForTheme(
+        rawRects,
+        paddingX: theme.regionBlockPaddingX,
+        paddingY: theme.regionBlockPaddingY,
+      );
+      prepared.add(RegionBlockRects(block: block, rects: normalized));
+    }
+    if (prepared.isEmpty) return;
+
+    // Гарантия: на каждой визуальной строке рамки/заливки разных блоков
+    // не пересекаются — только сужаем сегменты, не сдвигая их по тексту.
+    RegionBlockGeometry.avoidOverlaps(prepared);
+
+    // 1) Сначала заливки всех блоков.
+    for (final p in prepared) {
+      _paintRegionBlockFill(canvas, p.block, p.rects);
+    }
+
+    // 2) Затем рамки поверх всех заливок.
+    // Внешние (более длинные range) рисуем последними, чтобы их рамка
+    // не перекрывалась вложенными блоками.
+    final borders = List<RegionBlockRects>.of(prepared)
+      ..sort((a, b) => a.block.range.length.compareTo(b.block.range.length));
+    for (final p in borders) {
+      _paintRegionBlockBorder(canvas, p.block, p.rects);
+    }
+  }
+
+  void _paintRegionBlockFill(
+    Canvas canvas,
+    EditorRegionBlock block,
+    List<Rect> rects,
+  ) {
+    final path = _buildRegionOutlineFromRects(rects);
+    if (path == null) return;
+
+    final fill = block.fillColor;
+    if (fill != null) {
+      canvas.drawPath(
+        path,
+        Paint()
+          ..color = fill
+          ..style = PaintingStyle.fill,
+      );
+    }
+  }
+
+  void _paintRegionBlockBorder(
+    Canvas canvas,
+    EditorRegionBlock block,
+    List<Rect> rects,
+  ) {
+    final path = _buildRegionOutlineFromRects(rects);
+    if (path == null) return;
+
+    // Рисуем рамку "внутрь" фигуры: border = outer - inner.
+    final bw = controller.theme.regionBlockBorderWidth;
+    final borderColor =
+        block.borderColor ?? controller.theme.regionBlockBorderColor;
+    if (bw > 0) {
+      // Надёжный stroke "внутрь": клипаем по внешней фигуре и рисуем stroke
+      // удвоенной толщины. Наружная половина обрезается clip'ом.
+      canvas
+        ..save()
+        ..clipPath(path)
+        ..drawPath(
+          path,
+          Paint()
+            ..color = borderColor
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = bw * 2
+            ..strokeJoin = StrokeJoin.round,
+        )
+        ..restore();
+    }
+  }
+
+  List<Rect> _rectsForBoxes(
+    List<EditorBox> boxes,
+    double textOffsetX,
+    double padding,
+  ) {
+    final rects = <Rect>[];
+    for (final box in boxes) {
+      final left = textOffsetX + box.left - padding;
+      var right = textOffsetX + box.right + padding;
+      final top = box.top - padding;
+      final bottom = box.bottom + padding;
+      if (right < left) right = left;
+      // Минимальная ширина, чтобы контур не «схлопывался» на пустых строках.
+      final minWidth = padding * 2 + 1;
+      if (right - left < minWidth) right = left + minWidth;
+      rects.add(Rect.fromLTRB(left, top, right, bottom));
+    }
+    return rects;
+  }
+
+  /// Собирает единый ступенчатый контур из по-строчных [rects].
+  Path? _buildRegionOutlineFromRects(List<Rect> rects) {
+    if (rects.isEmpty) return null;
+
+    // Однострочный блок — просто скруглённый прямоугольник.
+    if (rects.length == 1) {
+      return Path()..addRRect(_roundedFromRect(rects.first));
+    }
+
+    // Ступенчатый контур: правая сторона сверху вниз, левая — снизу вверх.
+    // Верхняя грань первой строки.
+    final path = Path()
+      ..moveTo(rects.first.left, rects.first.top)
+      ..lineTo(rects.first.right, rects.first.top);
+    // Правые грани сверху вниз со «ступеньками» между строками.
+    for (var i = 0; i < rects.length; i++) {
+      final r = rects[i];
+      path.lineTo(r.right, r.bottom);
+      if (i + 1 < rects.length) {
+        // Горизонтальная перемычка к правой грани следующей строки.
+        path.lineTo(rects[i + 1].right, r.bottom);
+      }
+    }
+    // Левые грани снизу вверх.
+    for (var i = rects.length - 1; i >= 0; i--) {
+      final r = rects[i];
+      path
+        ..lineTo(r.left, r.bottom)
+        ..lineTo(r.left, r.top);
+      if (i - 1 >= 0) {
+        path.lineTo(rects[i - 1].left, r.top);
+      }
+    }
+    path.close();
+    return path;
+  }
+
+  RRect _roundedFromRect(Rect rect) {
+    final r = controller.theme.regionBlockCornerRadius;
+    return RRect.fromRectAndRadius(rect, Radius.circular(r));
+  }
+
+  // Overlap-avoidance вынесен в RegionBlockGeometry для unit-тестов.
 
   /// Рисует одну визуальную строку, чередуя текст документа и inlay hints.
   ///

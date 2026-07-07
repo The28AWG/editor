@@ -46,6 +46,7 @@ export 'src/api/editor_menu.dart';
 export 'src/api/editor_overlay.dart';
 export 'src/api/editor_overlay_language_service.dart';
 export 'src/api/selection_change.dart';
+export 'src/decorations/editor_region_block.dart';
 export 'src/diagnostics/diagnostic_decorations.dart';
 export 'src/diagnostics/editor_diagnostic.dart';
 export 'src/diagnostics/inline_diagnostic_label.dart';

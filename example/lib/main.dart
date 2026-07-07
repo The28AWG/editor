@@ -16,6 +16,13 @@ import 'package:example/tree_sitter/dart_tree_sitter_highlighter.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+final class _SelectionStep {
+  const _SelectionStep(this.selection, this.label);
+
+  final Selection selection;
+  final String label;
+}
+
 void main() {
   runApp(EditorExampleApp(controller: AppAppearanceController()));
 }
@@ -148,6 +155,8 @@ class _EditorDemoPageState extends State<EditorDemoPage> with EditorHost {
   String? _appliedAppearanceName;
   DartLanguageService? _languageService;
   DartLspOverlayController? _lspOverlays;
+  final List<_SelectionStep> _selectionStack = [];
+  var _regionBlocksShown = false;
 
   DartSyntaxHighlighter? get _lspHighlighter => widget.services.lsp;
   DartTreeSitterSyntaxHighlighter? get _treeSitterHighlighter =>
@@ -243,6 +252,354 @@ class _EditorDemoPageState extends State<EditorDemoPage> with EditorHost {
     _lspOverlays?.dispose();
     _controller.dispose();
     super.dispose();
+  }
+
+  String get _activeSelectionLevelLabel =>
+      _selectionStack.isEmpty ? 'каретка' : _selectionStack.last.label;
+
+  void _pushSelectionIfNeeded(Selection sel, String label) {
+    if (_selectionStack.isEmpty) {
+      _selectionStack.add(_SelectionStep(sel, label));
+      return;
+    }
+    final last = _selectionStack.last.selection;
+    if (last.start == sel.start && last.end == sel.end) return;
+    _selectionStack.add(_SelectionStep(sel, label));
+  }
+
+  void _shrinkSelection() {
+    final primary = _controller.selection.primary;
+    if (_selectionStack.isEmpty) {
+      _selectionStack
+        ..clear()
+        ..add(
+          _SelectionStep(
+            primary,
+            primary.isCollapsed ? 'каретка' : 'пользовательское',
+          ),
+        );
+      return;
+    }
+    // Если пользователь выделил мышью — синхронизируем стек с текущим состоянием.
+    final top = _selectionStack.last.selection;
+    if (top.start != primary.start || top.end != primary.end) {
+      _selectionStack
+        ..clear()
+        ..add(
+          _SelectionStep(
+            primary,
+            primary.isCollapsed ? 'каретка' : 'пользовательское',
+          ),
+        );
+      return;
+    }
+    if (_selectionStack.length <= 1) return;
+    _selectionStack.removeLast();
+    _controller.setPrimarySelection(_selectionStack.last.selection);
+  }
+
+  void _toggleRegionBlocks() {
+    setState(() => _regionBlocksShown = !_regionBlocksShown);
+    if (!_regionBlocksShown) {
+      _controller.setRegionBlocks(const []);
+      return;
+    }
+    _controller.setRegionBlocks(_demoRegionBlocks());
+  }
+
+  /// Тестовые блоки поверх текущего сэмпла: многострочный + два блока на одной строке.
+  List<EditorRegionBlock> _demoRegionBlocks() {
+    final text = _controller.document.text;
+    final blocks = <EditorRegionBlock>[];
+
+    // 1) Многострочный блок вокруг тела функции greet {...}.
+    final greetBody = _rangeBetween(text, 'greet(String name', '}');
+    if (greetBody != null) {
+      blocks.add(
+        EditorRegionBlock(
+          range: greetBody,
+          borderColor: const Color(0xFF4C8BF5),
+          fillColor: const Color(0x224C8BF5),
+        ),
+      );
+    }
+
+    // 1b) Ещё один многострочный блок вокруг main {...}.
+    final mainBody = _rangeBetween(text, 'void main()', '}');
+    if (mainBody != null) {
+      blocks.add(
+        EditorRegionBlock(
+          range: mainBody,
+          borderColor: const Color(0xFFB07DFF),
+          fillColor: const Color(0x22B07DFF),
+        ),
+      );
+    }
+
+    // 2) Два независимых блока на одной строке: name и count в вызове greet.
+    final callArgs = _rangeOf(text, 'greet(name, count: count)');
+    if (callArgs != null) {
+      final nameRange = _rangeOf(text, 'name', from: callArgs.start);
+      if (nameRange != null) {
+        blocks.add(
+          EditorRegionBlock(
+            range: nameRange,
+            borderColor: const Color(0xFF34A853),
+            fillColor: const Color(0x2234A853),
+          ),
+        );
+      }
+      final countRange = _rangeOf(text, 'count: count', from: callArgs.start);
+      if (countRange != null) {
+        blocks.add(
+          EditorRegionBlock(
+            range: countRange,
+            borderColor: const Color(0xFFEA4335),
+            fillColor: const Color(0x22EA4335),
+          ),
+        );
+      }
+    }
+
+    return blocks;
+  }
+
+  Range? _rangeOf(String text, String needle, {int from = 0}) {
+    final i = text.indexOf(needle, from);
+    if (i < 0) return null;
+    return Range(i, i + needle.length);
+  }
+
+  Range? _rangeBetween(String text, String startNeedle, String endNeedle) {
+    final s = text.indexOf(startNeedle);
+    if (s < 0) return null;
+    final e = text.indexOf(endNeedle, s + startNeedle.length);
+    if (e < 0) return null;
+    return Range(s, e + endNeedle.length);
+  }
+
+  void _expandSelection() {
+    final primary = _controller.selection.primary;
+    if (_selectionStack.isEmpty) {
+      _selectionStack.add(
+        _SelectionStep(
+          primary,
+          primary.isCollapsed ? 'каретка' : 'пользовательское',
+        ),
+      );
+    }
+    // Если пользователь выделил мышью — сбрасываем стек и начинаем от текущего.
+    final top = _selectionStack.last.selection;
+    final base = (top.start == primary.start && top.end == primary.end)
+        ? top
+        : primary;
+    if (base.start != top.start || base.end != top.end) {
+      _selectionStack
+        ..clear()
+        ..add(
+          _SelectionStep(
+            base,
+            base.isCollapsed ? 'каретка' : 'пользовательское',
+          ),
+        );
+    }
+
+    final next = _computeNextSelection(base);
+    _pushSelectionIfNeeded(next.selection, next.label);
+    _controller.setPrimarySelection(next.selection);
+  }
+
+  _SelectionStep _computeNextSelection(Selection current) {
+    final text = _controller.document.text;
+    final len = text.length;
+    if (len == 0) return const _SelectionStep(Selection(0, 0), 'каретка');
+
+    final start = current.start.clamp(0, len);
+    final end = current.end.clamp(0, len);
+    final head = current.head.clamp(0, len);
+
+    // 1) Схлопнутое выделение -> слово (или 1 символ).
+    if (start == end) {
+      final word = wordRangeAt(text, head);
+      if (word != null && word.end > word.start) {
+        return _SelectionStep(Selection(word.start, word.end), 'слово');
+      }
+      final nextEnd = (head + 1).clamp(0, len);
+      if (nextEnd == head) {
+        return _SelectionStep(Selection(head, head), 'каретка');
+      }
+      return _SelectionStep(Selection(head, nextEnd), 'символ');
+    }
+
+    // 2) Попытка расширить до "скобки/кавычки вокруг" (если текущий селект внутри пары).
+    final pair = _enclosingPairRange(text, start, end);
+    if (pair != null) {
+      final open = text.codeUnitAt(pair.start);
+      final label = switch (open) {
+        0x28 => 'скобки ()',
+        0x5B => 'скобки []',
+        0x7B => 'скобки {}',
+        0x22 => 'кавычки ""',
+        0x27 => "кавычки ''",
+        _ => 'пара',
+      };
+      return _SelectionStep(Selection(pair.start, pair.end), label);
+    }
+
+    // 3) Строка целиком.
+    final line = _lineRange(text, start, end);
+    if (line != null &&
+        (line.start != start || line.end != end) &&
+        (line.end - line.start) >= (end - start)) {
+      return _SelectionStep(Selection(line.start, line.end), 'строка');
+    }
+
+    // 4) Блок {...} (упрощённо).
+    final block = _enclosingBraceBlock(text, start, end);
+    if (block != null) {
+      return _SelectionStep(Selection(block.start, block.end), 'блок {}');
+    }
+
+    // 5) Весь документ.
+    return _SelectionStep(Selection(0, len), 'документ');
+  }
+
+  Range? _lineRange(String text, int selStart, int selEnd) {
+    final len = text.length;
+    if (len == 0) return null;
+
+    var left = selStart.clamp(0, len);
+    var right = selEnd.clamp(0, len);
+
+    while (left > 0 && text.codeUnitAt(left - 1) != 0x0A) {
+      left--;
+    }
+    while (right < len && text.codeUnitAt(right) != 0x0A) {
+      right++;
+    }
+    return Range(left, right);
+  }
+
+  Range? _enclosingPairRange(String text, int selStart, int selEnd) {
+    final len = text.length;
+    if (len == 0) return null;
+
+    // Приоритет: если уже выделили часть внутри (), [], {}, '' или "" — расширяем до пары.
+    final pairs = <(int open, int close)>[
+      (0x28, 0x29), // ()
+      (0x5B, 0x5D), // []
+      (0x7B, 0x7D), // {}
+      (0x22, 0x22), // ""
+      (0x27, 0x27), // ''
+    ];
+
+    for (final p in pairs) {
+      final r = _enclosingPairRangeFor(text, selStart, selEnd, p.$1, p.$2);
+      if (r != null) return r;
+    }
+    return null;
+  }
+
+  Range? _enclosingPairRangeFor(
+    String text,
+    int selStart,
+    int selEnd,
+    int open,
+    int close,
+  ) {
+    final len = text.length;
+    var left = selStart.clamp(0, len);
+    // selEnd здесь нужен только для проверки попадания в диапазон.
+    final right = selEnd.clamp(0, len);
+
+    // Ищем ближайший open слева (до 2k символов, чтобы не лагало на огромных файлах).
+    const maxScan = 2000;
+    var scanned = 0;
+    var openIndex = -1;
+    while (left > 0 && scanned < maxScan) {
+      left--;
+      scanned++;
+      if (text.codeUnitAt(left) == open) {
+        openIndex = left;
+        break;
+      }
+      // Упрощение: не перескакиваем через переводы строк для кавычек.
+      if ((open == 0x22 || open == 0x27) && text.codeUnitAt(left) == 0x0A) {
+        break;
+      }
+    }
+    if (openIndex < 0) return null;
+
+    // Ищем закрывающую справа.
+    scanned = 0;
+    var i = openIndex + 1;
+    var depth = 0;
+    while (i < len && scanned < maxScan) {
+      final cu = text.codeUnitAt(i);
+      scanned++;
+      if (open != close) {
+        if (cu == open) depth++;
+        if (cu == close) {
+          if (depth == 0) {
+            final start = openIndex;
+            final end = i + 1;
+            if (start <= selStart && right <= end) return Range(start, end);
+            return null;
+          }
+          depth--;
+        }
+      } else {
+        if (cu == close) {
+          final start = openIndex;
+          final end = i + 1;
+          if (start <= selStart && right <= end) return Range(start, end);
+          return null;
+        }
+        if (cu == 0x0A) break;
+      }
+      i++;
+    }
+    return null;
+  }
+
+  Range? _enclosingBraceBlock(String text, int selStart, int selEnd) {
+    final len = text.length;
+    if (len == 0) return null;
+
+    // Очень упрощённо: ищем '{' слева и подбираем ближайшую '}' справа с учётом глубины.
+    const maxScan = 4000;
+    var scanned = 0;
+    var left = selStart.clamp(0, len);
+    var openIndex = -1;
+    while (left > 0 && scanned < maxScan) {
+      left--;
+      scanned++;
+      if (text.codeUnitAt(left) == 0x7B) {
+        openIndex = left;
+        break;
+      }
+    }
+    if (openIndex < 0) return null;
+
+    scanned = 0;
+    var i = openIndex + 1;
+    var depth = 0;
+    while (i < len && scanned < maxScan) {
+      final cu = text.codeUnitAt(i);
+      scanned++;
+      if (cu == 0x7B) depth++;
+      if (cu == 0x7D) {
+        if (depth == 0) {
+          final start = openIndex;
+          final end = i + 1;
+          if (start <= selStart && selEnd <= end) return Range(start, end);
+          return null;
+        }
+        depth--;
+      }
+      i++;
+    }
+    return null;
   }
 
   void _onOverlayMenu(String value) {
@@ -402,6 +759,39 @@ class _EditorDemoPageState extends State<EditorDemoPage> with EditorHost {
           ],
         ),
         actions: [
+          ListenableBuilder(
+            listenable: _controller,
+            builder: (context, child) => IconButton(
+              tooltip: 'Сузить выделение',
+              icon: const Icon(Icons.unfold_less),
+              onPressed: _selectionStack.length > 1 ? _shrinkSelection : null,
+            ),
+          ),
+          IconButton(
+            tooltip: 'Расширить выделение',
+            icon: const Icon(Icons.unfold_more),
+            onPressed: _expandSelection,
+          ),
+          IconButton(
+            tooltip: _regionBlocksShown
+                ? 'Скрыть блоки-рамки'
+                : 'Показать блоки-рамки',
+            isSelected: _regionBlocksShown,
+            icon: const Icon(Icons.crop_free),
+            onPressed: _toggleRegionBlocks,
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Center(
+              child: ListenableBuilder(
+                listenable: _controller,
+                builder: (context, child) => Text(
+                  _activeSelectionLevelLabel,
+                  style: Theme.of(context).textTheme.labelMedium,
+                ),
+              ),
+            ),
+          ),
           PopupMenuButton<String>(
             tooltip: 'Overlay demos',
             icon: const Icon(Icons.layers),

@@ -121,12 +121,13 @@ final class _OverlayPanelState extends State<_OverlayPanel> {
     widget.coordinator.updateMeasuredSize(widget.session.id, box.size);
   }
 
-  Rect _layoutBoundsFor(EditorOverlayLayoutPolicy policy) => overlayLayoutBounds(
-    viewportRectLocal: widget.viewportRectLocal,
-    viewportGlobalOrigin: widget.viewportOrigin,
-    overlayHostSize: widget.overlayHostSize,
-    clampToViewport: policy.clampToViewport,
-  );
+  Rect _layoutBoundsFor(EditorOverlayLayoutPolicy policy) =>
+      overlayLayoutBounds(
+        viewportRectLocal: widget.viewportRectLocal,
+        viewportGlobalOrigin: widget.viewportOrigin,
+        overlayHostSize: widget.overlayHostSize,
+        clampToViewport: policy.clampToViewport,
+      );
 
   Offset _panelGlobalTopLeft(EditorOverlayLayoutResult layout) {
     final session = widget.session;
