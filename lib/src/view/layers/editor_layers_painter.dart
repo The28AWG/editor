@@ -21,12 +21,14 @@ import 'package:flutter/widgets.dart';
 ///
 /// Порядок отрисовки за кадр:
 /// 1. Фон и необязательная колонка gutter.
-/// 2. Подсветка текущей строки для основной линии каретки.
-/// 3. Номера строк в gutter (при [showGutter]).
-/// 4. Текст документа с чередованием inlay hints.
-/// 5. Inline «призрачные» диагностические сообщения на последней визуальной строке каждой линии.
-/// 6. Прямоугольники выделения (несвёрнутые диапазоны).
-/// 7. Линии каретки (свёрнутые выделения).
+/// 2. Заливки блоков-рамок ([EditorRegionBlock]) — под текстом.
+/// 3. Подсветка текущей строки для основной линии каретки.
+/// 4. Номера строк в gutter (при [showGutter]).
+/// 5. Текст документа с чередованием inlay hints.
+/// 6. Inline «призрачные» диагностические сообщения на последней визуальной строке каждой линии.
+/// 7. Прямоугольники выделения (несвёрнутые диапазоны).
+/// 8. Рамки блоков-рамок — поверх выделения, под каретками.
+/// 9. Линии каретки (свёрнутые выделения).
 ///
 /// Перерисовывается при уведомлении [controller] ([repaint: controller]).
 final class EditorLayersPainter extends CustomPainter {
@@ -90,13 +92,19 @@ final class EditorLayersPainter extends CustomPainter {
         label.documentLine: label,
     };
 
+    final preparedRegionBlocks = _prepareRegionBlocks(textOffsetX);
+
     if (viewH > 0) {
       canvas
         ..save()
         ..clipRect(Rect.fromLTWH(0, scroll, size.width, viewH));
     }
 
-    _paintRegionBlocks(canvas, textOffsetX);
+    if (preparedRegionBlocks != null) {
+      for (final p in preparedRegionBlocks) {
+        _paintRegionBlockFill(canvas, p.block, p.rects);
+      }
+    }
 
     // Прыгаем к первой строке, чьё нижнее ребро ещё в viewport: без word-wrap
     // это O(1), с переносом — O(log n) через _blockTops. Так paint больше не
@@ -170,6 +178,13 @@ final class EditorLayersPainter extends CustomPainter {
     }
 
     _paintSelection(canvas, textOffsetX);
+    if (preparedRegionBlocks != null) {
+      final borders = List<RegionBlockRects>.of(preparedRegionBlocks)
+        ..sort((a, b) => a.block.range.length.compareTo(b.block.range.length));
+      for (final p in borders) {
+        _paintRegionBlockBorder(canvas, p.block, p.rects);
+      }
+    }
     _paintCarets(canvas, textOffsetX);
   }
 
@@ -196,13 +211,10 @@ final class EditorLayersPainter extends CustomPainter {
     }
   }
 
-  /// Рисует декоративные блоки-рамки ([EditorRegionBlock]) поверх фона.
-  ///
-  /// Каждый блок отрисовывается независимо по собственному ступенчатому
-  /// контуру, поэтому несколько блоков на одной строке не сливаются.
-  void _paintRegionBlocks(Canvas canvas, double textOffsetX) {
+  /// Готовит геометрию блоков-рамок для отрисовки за кадр.
+  List<RegionBlockRects>? _prepareRegionBlocks(double textOffsetX) {
     final blocks = controller.regionBlocks;
-    if (blocks.isEmpty) return;
+    if (blocks.isEmpty) return null;
 
     final lineHeightFactor = controller.theme.lineHeight;
     final prepared = <RegionBlockRects>[];
@@ -218,25 +230,12 @@ final class EditorLayersPainter extends CustomPainter {
       );
       prepared.add(RegionBlockRects(block: block, rects: normalized));
     }
-    if (prepared.isEmpty) return;
+    if (prepared.isEmpty) return null;
 
     // Гарантия: на каждой визуальной строке рамки/заливки разных блоков
     // не пересекаются — только сужаем сегменты, не сдвигая их по тексту.
     RegionBlockGeometry.avoidOverlaps(prepared);
-
-    // 1) Сначала заливки всех блоков.
-    for (final p in prepared) {
-      _paintRegionBlockFill(canvas, p.block, p.rects);
-    }
-
-    // 2) Затем рамки поверх всех заливок.
-    // Внешние (более длинные range) рисуем последними, чтобы их рамка
-    // не перекрывалась вложенными блоками.
-    final borders = List<RegionBlockRects>.of(prepared)
-      ..sort((a, b) => a.block.range.length.compareTo(b.block.range.length));
-    for (final p in borders) {
-      _paintRegionBlockBorder(canvas, p.block, p.rects);
-    }
+    return prepared;
   }
 
   void _paintRegionBlockFill(
